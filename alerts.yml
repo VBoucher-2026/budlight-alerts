@@ -1,0 +1,38 @@
+name: BudLight Cup alerts
+
+on:
+  schedule:
+    - cron: "0 14 * * *"   # daily summary: 10 AM Montreal (9 AM once clocks change Nov 1)
+    - cron: "0 21 * * *"   # lineup check: 5 PM Montreal (4 PM once clocks change Nov 1)
+  workflow_dispatch:       # "Run workflow" button for manual tests
+    inputs:
+      mode:
+        description: "summary or lineup"
+        default: "summary"
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run alerts
+        env:
+          LEAGUE_ID: "1562575461"
+          TEAM_ID: "3"
+          YEAR: "2027"
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          ESPN_SWID: ${{ secrets.ESPN_SWID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ inputs.mode }}"
+          elif [ "${{ github.event.schedule }}" = "0 21 * * *" ]; then
+            MODE="lineup"
+          else
+            MODE="summary"
+          fi
+          python fantasy_alerts.py "$MODE"
