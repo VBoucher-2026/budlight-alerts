@@ -4,10 +4,12 @@ on:
   schedule:
     - cron: "0 14 * * *"   # daily summary: 10 AM Montreal (9 AM once clocks change Nov 1)
     - cron: "0 21 * * *"   # lineup check: 5 PM Montreal (4 PM once clocks change Nov 1)
+    - cron: "30 12-23 * * *"   # steals check: hourly, 8:30 AM to 7:30 PM Montreal
+    - cron: "30 0-3 * * *"     # steals check: hourly, 8:30 PM to 11:30 PM Montreal
   workflow_dispatch:       # "Run workflow" button for manual tests
     inputs:
       mode:
-        description: "summary or lineup"
+        description: "summary, lineup or steals"
         default: "summary"
 
 jobs:
@@ -32,7 +34,9 @@ jobs:
             MODE="${{ inputs.mode }}"
           elif [ "${{ github.event.schedule }}" = "0 21 * * *" ]; then
             MODE="lineup"
-          else
+          elif [ "${{ github.event.schedule }}" = "0 14 * * *" ]; then
             MODE="summary"
+          else
+            MODE="steals"
           fi
           python fantasy_alerts.py "$MODE"
