@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ç#!/usr/bin/env python3
 """BudLight Cup alerts: ESPN fantasy hockey (H2H points) -> ntfy push.
 
 Modes:
@@ -26,7 +26,7 @@ NTFY_TOPIC = os.environ["NTFY_TOPIC"]
 HARD_OUT = {"OUT", "INJURY_RESERVE", "SUSPENSION"}
 STATUS_TEXT = {"OUT": "out", "INJURY_RESERVE": "on IR", "SUSPENSION": "suspended", "DAY_TO_DAY": "day-to-day"}
 POS = {"Center": "C", "Left Wing": "LW", "Right Wing": "RW", "Forward": "F", "Defense": "D", "Goalie": "G"}
-MIN_GP = 3            # below this, blend actual FP/G with ESPN's projection so 1-game flukes don't dominate
+PRIOR_GAMES = 5       # blend actual FP/G with ESPN's projection as if it were 5 extra games (fades as games pile up)
 GOALIE_SHARE = 0.6    # assume a goalie starts ~60% of his team's games
 TOP_SKATERS, TOP_GOALIES, TOP_TRENDING = 5, 2, 3
 STEALS_WINDOW_MIN = 65
@@ -75,7 +75,7 @@ def fetch_players(league, statuses, limit):
         gp = stats.get("34") or stats.get("0") or 0
         actual = season.get("appliedAverage") or 0
         proj = splits.get(f"10{YEAR}", {}).get("appliedAverage") or 0
-        avg = actual if (gp >= MIN_GP or not proj) else (gp * actual + (MIN_GP - gp) * proj) / MIN_GP
+        avg = (gp * actual + PRIOR_GAMES * proj) / (gp + PRIOR_GAMES) if proj else actual
         own = info.get("ownership", {}) or {}
         pid = info.get("id") or entry.get("id")
         out[pid] = {
@@ -98,13 +98,16 @@ class Schedule:
         days = sorted(int(d) for d in periods.get(str(league.currentMatchupPeriod), []))
         self.today = league.current_week
         source = "settings"
+        self.first_day_override = None
         if not days or days[-1] < self.today:
             # fallback: assume the matchup runs through Sunday (ESPN default, one scoring period per day)
             import datetime as _dt
             days_to_sunday = 6 - _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=-5))).weekday()
             days = list(range(self.today, self.today + days_to_sunday + 1))
             source = "fallback-to-Sunday"
-        self.first_day = bool(days) and self.today == days[0]
+            self.first_day_override = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=-5))).weekday() == 0
+        self.first_day = (self.first_day_override if self.first_day_override is not None
+                          else bool(days) and self.today == days[0])
         counts = settings.get("rosterSettings", {}).get("lineupSlotCounts", {})
         c = lambda i: int(counts.get(str(i), 0))
         self.slots = {"F": c(0) + c(1) + c(2) + c(3), "D": c(4), "G": c(5), "U": c(6), "IR": c(8)}
@@ -183,7 +186,7 @@ def remaining_value(roster, sched):
 
 
 def weakest(roster, group):
-    cands = [p for p in roster if p["group"] == group and p["slot"] != "IR"]
+    cands = [p for p in roster if p["group"] == group and p["slot"] != "IR" and healthy(p)]
     return min(cands, key=lambda p: p["avg"]) if cands else None
 
 
@@ -272,14 +275,15 @@ def pickups_section(sched, teams, fas):
         gain = week_value(f, sched) - week_value(drop, sched)
         if gain <= 0.5:
             continue
-        star = " ⭐ better long-term too" if f["avg"] > drop["avg"] + 0.3 else ""
-        rows.append((gain, f["group"],
-                     f"• +{gain:.1f} pts this wk: add {fa_line(f, sched)}, drop {drop['name']} "
-                     f"({drop['avg']:.1f} × {sched.games_left(drop.get('pro_id'))}g){star}"))
+        star = " ⭐" if f["avg"] > drop["avg"] + 0.3 else ""
+        rows.append((gain, f["group"], f"• +{gain:.1f} · {fa_line(f, sched)}{star} · drop {drop['name']}"))
     rows.sort(key=lambda r: r[0], reverse=True)
     skaters = [r[2] for r in rows if r[1] != "G"][:TOP_SKATERS]
     goalies = [r[2] for r in rows if r[1] == "G"][:TOP_GOALIES]
-    return skaters + goalies
+    if not skaters + goalies:
+        return []
+    legend = "(+pts gained this week vs the drop · ⭐ = also better long-term)"
+    return [legend] + skaters + goalies
 
 
 def trending_section(fas):
