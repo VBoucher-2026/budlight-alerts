@@ -97,6 +97,13 @@ class Schedule:
         periods = settings.get("scheduleSettings", {}).get("matchupPeriods", {})
         days = sorted(int(d) for d in periods.get(str(league.currentMatchupPeriod), []))
         self.today = league.current_week
+        source = "settings"
+        if not days or days[-1] < self.today:
+            # fallback: assume the matchup runs through Sunday (ESPN default, one scoring period per day)
+            import datetime as _dt
+            days_to_sunday = 6 - _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=-5))).weekday()
+            days = list(range(self.today, self.today + days_to_sunday + 1))
+            source = "fallback-to-Sunday"
         self.first_day = bool(days) and self.today == days[0]
         counts = settings.get("rosterSettings", {}).get("lineupSlotCounts", {})
         c = lambda i: int(counts.get(str(i), 0))
@@ -113,6 +120,9 @@ class Schedule:
         for sp in days:
             if sp >= self.today:
                 self.playing.setdefault(sp, set())
+        print(f"[schedule] matchup period {league.currentMatchupPeriod}, today=scoring period {self.today}, "
+              f"days={days} ({source}), slots={self.slots}, "
+              f"NHL teams still to play per day={ {k: len(v) for k, v in sorted(self.playing.items())} }")
 
     def games_left(self, pro_id):
         return sum(pro_id in teams for teams in self.playing.values())
