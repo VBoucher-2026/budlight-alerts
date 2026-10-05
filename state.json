@@ -1,3 +1,24 @@
 {
- "last_daily": "2026-10-05"
+ "ir_alerts": [],
+ "last_daily": "2026-10-05",
+ "seen_drops": [],
+ "statuses": {
+  "2562629": "ACTIVE",
+  "2590824": "ACTIVE",
+  "3020225": "INJURY_RESERVE",
+  "3041997": "ACTIVE",
+  "3114770": "ACTIVE",
+  "3899952": "ACTIVE",
+  "3899972": "ACTIVE",
+  "3904189": "ACTIVE",
+  "4024950": "ACTIVE",
+  "4233875": "ACTIVE",
+  "4565234": "ACTIVE",
+  "4587588": "ACTIVE",
+  "4587996": "ACTIVE",
+  "4874740": "ACTIVE",
+  "5080145": "ACTIVE",
+  "5509": "OUT",
+  "5798": "ACTIVE"
+ }
 }
