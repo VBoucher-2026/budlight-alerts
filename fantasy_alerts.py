@@ -38,6 +38,7 @@ MIN_QUALITY = 0.85      # the pickup must project to at least 85% of the dropped
 PRIOR_GAMES = 10        # blend actual FP/G with ESPN's projection as if the projection were 10 games
 GOALIE_SHARE = 0.65
 STEAL_MARGIN = 0.3
+BASELINE = {"F": 1.2, "D": 1.0, "G": 3.0}   # per-game value assumed for players ESPN doesn't project
 
 HARD_OUT = {"OUT", "INJURY_RESERVE", "SUSPENSION"}
 STATUS_TEXT = {"OUT": "out", "INJURY_RESERVE": "on IR", "SUSPENSION": "suspended",
@@ -97,7 +98,9 @@ def fetch_players(league, statuses, limit):
         gp = stats.get("34") or stats.get("0") or 0
         actual = season.get("appliedAverage") or 0
         proj_avg = proj.get("appliedAverage") or 0
-        value = (gp * actual + PRIOR_GAMES * proj_avg) / (gp + PRIOR_GAMES) if proj_avg else actual
+        # No ESPN projection = fringe player: shrink toward a low baseline so 2 hot games can't make him look like a star
+        prior = proj_avg or BASELINE[group_of(p.position)]
+        value = (gp * actual + PRIOR_GAMES * prior) / (gp + PRIOR_GAMES)
         pid = info.get("id") or entry.get("id")
         out[pid] = {"id": pid, "name": p.name, "group": group_of(p.position), "pos": POS.get(p.position, "?"),
                     "team": short_team(p.proTeam), "pro_id": info.get("proTeamId"),
@@ -228,8 +231,8 @@ def stream_moves(me, fas, sched, budget):
     for occ in stream_slots(me["roster"]):
         best = None
         for f in fas.values():
-            if f["group"] != occ["group"] or not healthy(f) or f["avail"] != "FREEAGENT":
-                continue
+            if f["group"] != occ["group"] or not healthy(f) or f["avail"] != "FREEAGENT" or not f["proj_total"]:
+                continue  # only recommend players ESPN projects for the season
             if f["value"] < MIN_QUALITY * occ["value"]:
                 continue
             gain = week_points(f, sched) - week_points(occ, sched)
@@ -386,6 +389,9 @@ def hourly_checks(league, sched, teams, fas, state):
 # ---------- main ----------
 def main():
     mode = (sys.argv[1] if len(sys.argv) > 1 else "auto").lower()
+    if mode not in ("auto", "weekly", "daily", "hourly"):
+        print(f"unknown mode '{mode}', treating as auto")
+        mode = "auto"
     now = dt.datetime.now(TZ)
     try:
         league = League(league_id=LEAGUE_ID, year=YEAR, espn_s2=ESPN_S2, swid=SWID)
@@ -401,8 +407,9 @@ def main():
 
     state = load_state()
     if mode == "auto":
-        run_weekly = now.weekday() == 0 and now.hour == 7 and state.get("last_weekly") != now.date().isoformat()
-        run_daily = now.hour == 10 and state.get("last_daily") != now.date().isoformat()
+        today = now.date().isoformat()
+        run_weekly = now.weekday() == 0 and now.hour >= 7 and state.get("last_weekly") != today
+        run_daily = now.hour >= 10 and state.get("last_daily") != today
     else:
         run_weekly, run_daily = mode == "weekly", mode == "daily"
 
