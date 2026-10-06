@@ -1,7 +1,9 @@
 {
  "ir_alerts": [],
  "last_daily": "2026-10-06",
- "seen_drops": [],
+ "seen_drops": [
+  "1791325960449-Aleksander Barkov"
+ ],
  "statuses": {
   "2562629": "ACTIVE",
   "2590824": "ACTIVE",
