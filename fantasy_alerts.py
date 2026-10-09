@@ -48,11 +48,16 @@ NAME_TO_PRO_ID = {v: k for k, v in PRO_TEAM_MAP.items()}
 
 
 # ---------- helpers ----------
-def notify(title, body, priority="default", tags="ice_hockey"):
+def notify(title, body, priority="high", tags="ice_hockey"):
     r = requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=body[:3900].encode("utf-8"),
-                      headers={"Title": title, "Priority": priority, "Tags": tags}, timeout=20)
+                      headers={"Title": title.encode("ascii", "ignore").decode(), "Priority": priority, "Tags": tags},
+                      timeout=20)
     r.raise_for_status()
-    print(f"[sent] {title}\n{body}\n")
+    try:
+        msg_id = r.json().get("id")
+    except Exception:
+        msg_id = "?"
+    print(f"[sent id={msg_id} priority={priority}] {title}\n{body}\n")
 
 
 def short_team(name):
@@ -318,7 +323,7 @@ def weekly_plan(league, sched, teams, fas):
     parts += [m[1] for m in moves] or ["No stream worth making this week. Your lowest-value skaters: "
                                         + ", ".join(f"{p['name']} ({p['value']:.1f}/g)" for p in stream_slots(me["roster"]))]
     parts += ["", "🏒 MATCHUP", *matchup_lines(league, sched, teams)]
-    notify("Weekly plan: " + (f"{len(moves)} move(s)" if moves else "no moves"), "\n".join(parts))
+    notify("Weekly plan: " + (f"{len(moves)} move(s)" if moves else "no moves"), "\n".join(parts), "high")
 
 
 def daily_brief(league, sched, teams, fas):
@@ -338,7 +343,7 @@ def daily_brief(league, sched, teams, fas):
     parts += ["", f"Adds used {used}/{WEEKLY_ADDS}"]
     title = ("ACTION: " + (moves[0][1].split("\n")[0] if moves else actions[0][2:].split(":")[0])) if (moves or actions) \
         else "No moves today"
-    notify(title[:80], "\n".join(parts), "high" if (moves or actions) else "default")
+    notify(title[:80], "\n".join(parts), "high")
 
 
 def hourly_checks(league, sched, teams, fas, state):
@@ -363,6 +368,7 @@ def hourly_checks(league, sched, teams, fas, state):
     # 3) league-mates dropping someone better than your stream slot
     seen = state.setdefault("seen_drops", [])
     floor = min((p["value"] for p in stream_slots(me["roster"])), default=0)
+    free_ir = sched.slots["IR"] - sum(p["slot"] == "IR" for p in me["roster"])
     cutoff = (time.time() - 70 * 60) * 1000
     by_name = {f["name"]: f for f in fas.values()}
     for act in league.recent_activity(size=25):
@@ -375,11 +381,19 @@ def hourly_checks(league, sched, teams, fas, state):
                 continue
             seen.append(key)
             f = by_name.get(pname)
-            if f and f["value"] > floor + STEAL_MARGIN and f["group"] != "G":
+            if not f or f["group"] == "G" or f["value"] <= floor + STEAL_MARGIN:
+                continue
+            tname = getattr(team, "team_name", team)
+            if healthy(f):
                 alerts.append(("Grab him: " + pname,
-                               f"{getattr(team, 'team_name', team)} dropped {fa_desc(f, sched)}.\n"
+                               f"{tname} dropped {fa_desc(f, sched)}.\n"
                                f"Better than your stream slot ({floor:.1f}/g). He's on waivers for 1 day: claim him "
                                f"if you'd keep him, otherwise skip (a claim moves you to last in waiver order)."))
+            elif free_ir > 0:
+                alerts.append(("IR stash? " + pname,
+                               f"{tname} dropped {pname} ({f['pos']}, {f['team']}, {f['value']:.1f}/g), but he is "
+                               f"{STATUS_TEXT.get(f['status'], f['status'].lower())}. You have a free IR slot: claim him "
+                               f"only if you'd want him for the second half of the season."))
     state["seen_drops"] = seen[-200:]
     for title, body in alerts:
         notify(title, body, "high", "rotating_light")
