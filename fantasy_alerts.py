@@ -209,7 +209,15 @@ def stream_slots(roster):
 
 
 def adds_used(league):
-    """Adds by your team since Monday 00:00 local (start of the matchup week)."""
+    """Adds counted by ESPN for the current matchup period (same number the app shows)."""
+    try:
+        data = league.espn_request.league_get(params={"view": "mTeam"})
+        for t in data.get("teams", []):
+            if t.get("id") == TEAM_ID:
+                totals = (t.get("transactionCounter") or {}).get("matchupAcquisitionTotals") or {}
+                return int(totals.get(str(league.currentMatchupPeriod), 0))
+    except Exception as e:
+        print(f"[adds] ESPN counter unavailable ({type(e).__name__}), estimating from activity")
     now = dt.datetime.now(TZ)
     monday = (now - dt.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     cutoff = monday.timestamp() * 1000
