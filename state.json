@@ -1,5 +1,7 @@
 {
- "ir_alerts": [],
+ "ir_alerts": [
+  "\u2705 Zach Hyman is active again: move him o"
+ ],
  "last_daily": "2026-10-16",
  "last_weekly": "2026-10-12",
  "seen_drops": [
@@ -42,7 +44,7 @@
   "4874740": "DAY_TO_DAY",
   "4874919": "ACTIVE",
   "5080145": "ACTIVE",
-  "5509": "DAY_TO_DAY",
+  "5509": "ACTIVE",
   "5798": "ACTIVE"
  }
 }
