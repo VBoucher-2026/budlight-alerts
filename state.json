@@ -1,6 +1,7 @@
 {
  "ir_alerts": [
-  "\u2705 Zach Hyman is active again: move him o"
+  "\u2705 Zach Hyman is active again: move him o",
+  "\ud83c\udfe5 Jason Robertson is IR-eligible: move h"
  ],
  "last_daily": "2026-10-19",
  "last_weekly": "2026-10-19",
@@ -35,6 +36,7 @@
  "statuses": {
   "2562629": "ACTIVE",
   "2590824": "ACTIVE",
+  "2590829": "ACTIVE",
   "3020225": "INJURY_RESERVE",
   "3041997": "ACTIVE",
   "3114770": "ACTIVE",
