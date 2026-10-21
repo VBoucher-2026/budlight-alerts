@@ -107,7 +107,16 @@ def fetch_players(league, statuses, limit):
         prior = proj_avg or BASELINE[group_of(p.position)]
         value = (gp * actual + PRIOR_GAMES * prior) / (gp + PRIOR_GAMES)
         pid = info.get("id") or entry.get("id")
+        starter = None
+        for key in ("starterStatusByProGame", "starterStatus", "probableStarter", "goalieStatus"):
+            if key in info:
+                v = info[key]
+                starter = (next(iter(v.values())) if isinstance(v, dict) and v else v)
+                break
+        if group_of(p.position) == "G" and not out and os.environ.get("DEBUG_GOALIE_KEYS", "1") == "1":
+            print(f"[goalie-flag] {p.name}: raw keys={sorted(info.keys())} starter={starter}")
         out[pid] = {"id": pid, "name": p.name, "group": group_of(p.position), "pos": POS.get(p.position, "?"),
+                    "starter": str(starter).upper() if starter is not None else None,
                     "team": short_team(p.proTeam), "pro_id": info.get("proTeamId"),
                     "status": p.injuryStatus or "ACTIVE", "value": value, "gp": gp,
                     "proj_total": proj.get("appliedTotal") or 0,
@@ -133,7 +142,10 @@ class Schedule:
         self.playing = {sp: set() for sp in self.days}      # games not started yet
         self.all_games = {sp: set() for sp in self.days}    # all games that day
         self.day_name = {}
+        self.played_yesterday = set()
         for tid, games in league._get_all_pro_schedule().items():
+            if games.get(str(self.today - 1)):
+                self.played_yesterday.add(int(tid))
             for sp in self.days:
                 for g in games.get(str(sp)) or []:
                     self.all_games[sp].add(int(tid))
@@ -203,9 +215,10 @@ def remaining_value(roster, sched):
 
 
 def stream_slots(roster):
-    """Your N lowest-value healthy skaters, the only ones ever suggested as drops."""
+    """Your N healthy skaters with the lowest ESPN season projection, the only ones ever suggested as drops.
+    Uses the projection (not the early-season blend) so a star's slow start can't make him droppable."""
     skaters = [p for p in roster if p["group"] != "G" and p["slot"] != "IR" and healthy(p)]
-    return sorted(skaters, key=lambda p: p["value"])[:STREAM_SLOTS]
+    return sorted(skaters, key=lambda p: (p.get("proj_total") or p["value"] * 82, p["value"]))[:STREAM_SLOTS]
 
 
 def adds_used(league):
@@ -258,6 +271,39 @@ def stream_moves(me, fas, sched, budget):
                                 f"≈ +{gain:.0f} pts this week"))
     moves.sort(key=lambda m: m[0], reverse=True)
     return moves[:budget]
+
+
+def goalie_stream(me, fas, everyone, sched, budget):
+    """If your lower goalie has no game today, name an available goalie who likely starts tonight."""
+    goalies = [p for p in me["roster"] if p["group"] == "G" and p["slot"] != "IR"]
+    if len(goalies) < 2 or budget <= 0:
+        return None
+    g2 = min(goalies, key=lambda p: p.get("proj_total") or 0)
+    if sched.plays_today(g2["pro_id"]):
+        return None
+    # team's No. 1 goalie = highest ESPN projection among all goalies on that NHL team (owned or not)
+    best_on_team = {}
+    for p in everyone.values():
+        if p["group"] == "G" and p.get("pro_id"):
+            cur = best_on_team.get(p["pro_id"])
+            if cur is None or (p.get("proj_total") or 0) > (cur.get("proj_total") or 0):
+                best_on_team[p["pro_id"]] = p
+    cands = [f for f in fas.values() if f["group"] == "G" and healthy(f) and f["avail"] == "FREEAGENT"
+             and sched.plays_today(f["pro_id"]) and f["pro_id"] not in sched.played_yesterday
+             and best_on_team.get(f["pro_id"], {}).get("id") == f["id"]]
+    flagged = [f for f in fas.values() if f["group"] == "G" and healthy(f) and f["avail"] == "FREEAGENT"
+               and sched.plays_today(f["pro_id"]) and (f.get("starter") or "") in ("PROBABLE", "CONFIRMED", "STARTER", "P", "S")]
+    if flagged:
+        f = max(flagged, key=lambda p: (p.get("proj_total") or 0))
+        how = f"ESPN lists him as {f['starter'].lower()} starter tonight"
+    elif cands:
+        f = max(cands, key=lambda p: (p.get("proj_total") or 0))
+        how = "he is his team's No. 1 and plays tonight (no back-to-back); confirm the P/S badge in the app"
+    else:
+        return None
+    return (f"🥅 {g2['name']} has no game today. {f['name']} ({f['team']}): {how}. "
+            f"Swap: drop {g2['name']}, add {f['name']}. Games left this week: {f['name']} "
+            f"{sched.games_left(f['pro_id'])}, {g2['name']} {sched.games_left(g2['pro_id'])}.")
 
 
 def dead_spots(me, sched):
@@ -334,10 +380,11 @@ def weekly_plan(league, sched, teams, fas):
     notify("Weekly plan: " + (f"{len(moves)} move(s)" if moves else "no moves"), "\n".join(parts), "high")
 
 
-def daily_brief(league, sched, teams, fas):
+def daily_brief(league, sched, teams, fas, everyone=None):
     me = teams[TEAM_ID]
     used = adds_used(league)
-    budget = WEEKLY_ADDS - ADDS_RESERVE - used
+    reserve = ADDS_RESERVE if len(sched.days) > 2 else 0   # adds expire Sunday night: spend them on the weekend
+    budget = WEEKLY_ADDS - reserve - used
     actions = ir_actions(me, fas, sched)
     moves = stream_moves(me, fas, sched, budget)
     dead = dead_spots(me, sched)
@@ -346,6 +393,10 @@ def daily_brief(league, sched, teams, fas):
         parts += ["", *actions]
     if moves:
         parts += ["", "🔁 TODAY'S MOVE", moves[0][1]]
+    gs = goalie_stream(me, fas, everyone or fas, sched, budget)
+    if gs:
+        parts += ["", gs]
+        actions = actions + [gs]
     if dead:
         parts += ["", "⚠️ " + "; ".join(dead)]
     parts += ["", f"Adds used {used}/{WEEKLY_ADDS}"]
@@ -440,8 +491,15 @@ def main():
         weekly_plan(league, sched, teams, fas)
         state["last_weekly"] = now.date().isoformat()
     if run_daily:
-        daily_brief(league, sched, teams, fas)
+        daily_brief(league, sched, teams, fas, {**fas, **rostered})
         state["last_daily"] = now.date().isoformat()
+    if mode == "auto" and now.hour >= 15 and state.get("last_goalie") != now.date().isoformat():
+        me = teams[TEAM_ID]
+        budget = WEEKLY_ADDS - (ADDS_RESERVE if len(sched.days) > 2 else 0) - adds_used(league)
+        gs = goalie_stream(me, fas, {**fas, **rostered}, sched, budget)
+        if gs:
+            notify("Goalie swap tonight?", gs, "high", "goal_net")
+        state["last_goalie"] = now.date().isoformat()
     save_state(state)
     print(f"done: mode={mode} local={now:%a %H:%M} hourly_alerts={n} weekly={run_weekly} daily={run_daily}")
 
