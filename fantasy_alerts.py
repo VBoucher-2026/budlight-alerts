@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 from espn_api.hockey import League
-from espn_api.hockey.constant import PRO_TEAM_MAP
+from espn_api.hockey.constant import PRO_TEAM_MAP, STATS_MAP
 from espn_api.hockey.player import Player
 
 LEAGUE_ID = int(os.environ["LEAGUE_ID"])
@@ -39,6 +39,8 @@ PRIOR_GAMES = 10        # blend actual FP/G with ESPN's projection as if the pro
 GOALIE_SHARE = 0.65
 STEAL_MARGIN = 0.3
 BASELINE = {"F": 1.2, "D": 1.0, "G": 3.0}   # per-game value assumed for players ESPN doesn't project
+# Players the script must never suggest dropping (exact names, comma-separated; can also be set as PROTECT env var)
+PROTECT = {n.strip() for n in os.environ.get("PROTECT", "").split(",") if n.strip()}
 
 HARD_OUT = {"OUT", "INJURY_RESERVE", "SUSPENSION"}
 STATUS_TEXT = {"OUT": "out", "INJURY_RESERVE": "on IR", "SUSPENSION": "suspended",
@@ -70,6 +72,16 @@ def group_of(position):
 
 def healthy(p):
     return p["status"] not in HARD_OUT
+
+
+def season_rank(p):
+    """Season value used for ranking: ESPN projection; if ESPN has none (rookies), actual average x 82 once he
+    has 3+ games; otherwise the low baseline."""
+    if p.get("proj_total"):
+        return p["proj_total"]
+    if (p.get("gp") or 0) >= 3 and p.get("actual"):
+        return p["actual"] * (82 if p["group"] != "G" else 55)
+    return BASELINE[p["group"]] * 60
 
 
 def load_state():
@@ -115,10 +127,18 @@ def fetch_players(league, statuses, limit):
                 break
         if group_of(p.position) == "G" and not out and os.environ.get("DEBUG_GOALIE_KEYS", "1") == "1":
             print(f"[goalie-flag] {p.name}: raw keys={sorted(info.keys())} starter={starter}")
+        last = splits.get(f"00{YEAR - 1}", {})
+        own = info.get("ownership") or {}
         out[pid] = {"id": pid, "name": p.name, "group": group_of(p.position), "pos": POS.get(p.position, "?"),
+                    "owned_pct": round(own.get("percentOwned", 0) or 0, 1), "owned_change": round(own.get("percentChange", 0) or 0, 1),
+                    "eligible": p.eligibleSlots, "injured": bool(info.get("injured")),
                     "starter": str(starter).upper() if starter is not None else None,
+                    "cur_total": season.get("appliedTotal") or 0, "proj_avg": proj_avg,
+                    "last_gp": (last.get("stats") or {}).get("34") or (last.get("stats") or {}).get("0") or 0,
+                    "last_total": last.get("appliedTotal") or 0, "last_avg": last.get("appliedAverage") or 0,
+                    "stats": {k: v for k, v in (p.stats or {}).items() if str(YEAR) in k or str(YEAR - 1) in k},
                     "team": short_team(p.proTeam), "pro_id": info.get("proTeamId"),
-                    "status": p.injuryStatus or "ACTIVE", "value": value, "gp": gp,
+                    "status": p.injuryStatus or "ACTIVE", "value": value, "gp": gp, "actual": actual,
                     "proj_total": proj.get("appliedTotal") or 0,
                     "avail": entry.get("status"), "on_team": entry.get("onTeamId"),
                     "eligible": [], "slot": None}
@@ -217,8 +237,8 @@ def remaining_value(roster, sched):
 def stream_slots(roster):
     """Your N healthy skaters with the lowest ESPN season projection, the only ones ever suggested as drops.
     Uses the projection (not the early-season blend) so a star's slow start can't make him droppable."""
-    skaters = [p for p in roster if p["group"] != "G" and p["slot"] != "IR" and healthy(p)]
-    return sorted(skaters, key=lambda p: (p.get("proj_total") or p["value"] * 82, p["value"]))[:STREAM_SLOTS]
+    skaters = [p for p in roster if p["group"] != "G" and p["slot"] != "IR" and healthy(p) and p["name"] not in PROTECT]
+    return sorted(skaters, key=lambda p: (season_rank(p), p["value"]))[:STREAM_SLOTS]
 
 
 def adds_used(league):
@@ -274,36 +294,50 @@ def stream_moves(me, fas, sched, budget):
 
 
 def goalie_stream(me, fas, everyone, sched, budget):
-    """If your lower goalie has no game today, name an available goalie who likely starts tonight."""
+    """For each of your goalies with no game today, name an available goalie who starts tonight."""
     goalies = [p for p in me["roster"] if p["group"] == "G" and p["slot"] != "IR"]
-    if len(goalies) < 2 or budget <= 0:
-        return None
-    g2 = min(goalies, key=lambda p: p.get("proj_total") or 0)
-    if sched.plays_today(g2["pro_id"]):
-        return None
-    # team's No. 1 goalie = highest ESPN projection among all goalies on that NHL team (owned or not)
+    print("[goalies] " + ", ".join(f"{p['name']} proj={p.get('proj_total') or 0:.0f} avg={p.get('actual') or 0:.1f} rank={season_rank(p):.0f}"
+                                  for p in goalies))
+    idle = [p for p in goalies if p["name"] not in PROTECT and not sched.plays_today(p["pro_id"])]
+    if not idle or budget <= 0:
+        return []
     best_on_team = {}
     for p in everyone.values():
         if p["group"] == "G" and p.get("pro_id"):
             cur = best_on_team.get(p["pro_id"])
             if cur is None or (p.get("proj_total") or 0) > (cur.get("proj_total") or 0):
                 best_on_team[p["pro_id"]] = p
-    cands = [f for f in fas.values() if f["group"] == "G" and healthy(f) and f["avail"] == "FREEAGENT"
-             and sched.plays_today(f["pro_id"]) and f["pro_id"] not in sched.played_yesterday
-             and best_on_team.get(f["pro_id"], {}).get("id") == f["id"]]
-    flagged = [f for f in fas.values() if f["group"] == "G" and healthy(f) and f["avail"] == "FREEAGENT"
-               and sched.plays_today(f["pro_id"]) and (f.get("starter") or "") in ("PROBABLE", "CONFIRMED", "STARTER", "P", "S")]
-    if flagged:
-        f = max(flagged, key=lambda p: (p.get("proj_total") or 0))
-        how = f"ESPN lists him as {f['starter'].lower()} starter tonight"
-    elif cands:
-        f = max(cands, key=lambda p: (p.get("proj_total") or 0))
-        how = "he is his team's No. 1 and plays tonight (no back-to-back); confirm the P/S badge in the app"
-    else:
-        return None
-    return (f"🥅 {g2['name']} has no game today. {f['name']} ({f['team']}): {how}. "
-            f"Swap: drop {g2['name']}, add {f['name']}. Games left this week: {f['name']} "
-            f"{sched.games_left(f['pro_id'])}, {g2['name']} {sched.games_left(g2['pro_id'])}.")
+    pool = [f for f in fas.values() if f["group"] == "G" and healthy(f) and f["avail"] == "FREEAGENT"
+            and sched.plays_today(f["pro_id"])]
+    confirmed = [f for f in pool if (f.get("starter") or "") in ("PROBABLE", "CONFIRMED", "STARTER", "P", "S")]
+    likely = [f for f in pool if f not in confirmed and f["pro_id"] not in sched.played_yesterday
+              and best_on_team.get(f["pro_id"], {}).get("id") == f["id"]]
+    ranked = sorted(confirmed, key=season_rank, reverse=True) + sorted(likely, key=season_rank, reverse=True)
+    lines = []
+    for g in sorted(idle, key=season_rank):
+        if len(lines) >= budget:
+            break
+        # only worth it if the pickup gives strictly more starts this week than the goalie dropped
+        f = next((c for c in ranked if sched.games_left(c["pro_id"]) > sched.games_left(g["pro_id"])), None)
+        if not f:
+            continue
+        ranked.remove(f)
+        how = (f"ESPN lists him as {f['starter'].lower()} starter tonight" if f in confirmed
+               else "his team's No. 1, plays tonight, no back-to-back; confirm the P/S badge first")
+        lines.append(f"🥅 {g['name']} has no game today → drop him, add {f['name']} ({f['team']}): {how}. "
+                     f"Games left this week: {f['name']} {sched.games_left(f['pro_id'])}, {g['name']} {sched.games_left(g['pro_id'])}.")
+    return lines
+
+
+def goalie_report(me, fas, sched):
+    def line(p, tag=""):
+        badge = {"PROBABLE": " · P tonight", "CONFIRMED": " · S tonight", "STARTER": " · S tonight"}.get(p.get("starter") or "", "")
+        return (f"• {p['name']} ({p['team']}){tag}: avg {p.get('actual') or 0:.1f} over {int(p.get('gp') or 0)} gp · "
+                f"proj {p.get('proj_total') or 0:.0f} · {sched.games_left(p['pro_id'])} games left{badge}")
+    mine = [p for p in me["roster"] if p["group"] == "G"]
+    avail = sorted((f for f in fas.values() if f["group"] == "G" and healthy(f)), key=season_rank, reverse=True)[:8]
+    return ["YOUR GOALIES", *[line(p, " (IR)" if p["slot"] == "IR" else "") for p in mine], "",
+            "TOP AVAILABLE", *[line(p) for p in avail]]
 
 
 def dead_spots(me, sched):
@@ -327,8 +361,9 @@ def ir_actions(me, fas, sched):
     for p in to_ir[:max(free_ir, 0)]:
         lines.append(f"🏥 {p['name']} is IR-eligible: move him to IR (frees a roster spot), then add a {p['group']}")
     for p in ready:
-        drop = next(iter(sorted((q for q in me["roster"] if q["group"] == p["group"] and q["slot"] != "IR"),
-                                key=lambda q: q["value"])), None)
+        drop = next(iter(sorted((q for q in me["roster"] if q["group"] == p["group"] and q["slot"] != "IR"
+                                 and q["name"] not in PROTECT),
+                                key=season_rank)), None)
         tip = f", drop {drop['name']} ({drop['value']:.1f}/g)" if drop else ""
         lines.append(f"✅ {p['name']} is active again: move him off IR{tip}")
     return lines
@@ -395,8 +430,8 @@ def daily_brief(league, sched, teams, fas, everyone=None):
         parts += ["", "🔁 TODAY'S MOVE", moves[0][1]]
     gs = goalie_stream(me, fas, everyone or fas, sched, budget)
     if gs:
-        parts += ["", gs]
-        actions = actions + [gs]
+        parts += ["", *gs]
+        actions = actions + gs
     if dead:
         parts += ["", "⚠️ " + "; ".join(dead)]
     parts += ["", f"Adds used {used}/{WEEKLY_ADDS}"]
@@ -459,18 +494,116 @@ def hourly_checks(league, sched, teams, fas, state):
     return len(alerts)
 
 
+# ---------- snapshot for analysis outside the script ----------
+def build_snapshot(league, sched, teams, fas, rostered, now):
+    """Everything useful for roster decisions, written to snapshot.json (committed by the workflow)."""
+    req = league.espn_request
+    settings = req.league_get(params={"view": "mSettings"}).get("settings", {})
+    scoring = {}
+    for item in (settings.get("scoringSettings") or {}).get("scoringItems", []):
+        name = STATS_MAP.get(str(item.get("statId")), STATS_MAP.get(item.get("statId"), f"stat{item.get('statId')}"))
+        scoring[name or f"stat{item.get('statId')}"] = item.get("points")
+    sched_settings = settings.get("scheduleSettings") or {}
+    league_settings = {
+        "scoring": scoring,
+        "lineup_slots": sched.slots,
+        "roster_size": (settings.get("rosterSettings") or {}).get("rosterLocktimeType"),
+        "acquisition": {k: (settings.get("acquisitionSettings") or {}).get(k) for k in
+                        ("acquisitionLimit", "matchupAcquisitionLimit", "waiverHours", "waiverOrderReset", "acquisitionType")},
+        "trade": {k: (settings.get("tradeSettings") or {}).get(k) for k in ("deadlineDate", "vetoVotesRequired", "revisionHours")},
+        "schedule": {k: sched_settings.get(k) for k in ("matchupPeriodCount", "playoffTeamCount", "playoffMatchupPeriodLength",
+                                                        "playoffSeedingRule", "matchupPeriods")},
+    }
+    # standings + waiver order + acquisitions
+    tdata = req.league_get(params={"view": "mTeam"}).get("teams", [])
+    standings = []
+    for t in tdata:
+        rec = (t.get("record") or {}).get("overall") or {}
+        standings.append({"team_id": t.get("id"), "name": f"{t.get('location', '')} {t.get('nickname', '')}".strip() or t.get("name"),
+                          "wins": rec.get("wins"), "losses": rec.get("losses"), "ties": rec.get("ties"),
+                          "points_for": round(rec.get("pointsFor", 0) or 0, 1), "points_against": round(rec.get("pointsAgainst", 0) or 0, 1),
+                          "playoff_seed": t.get("playoffSeed"), "waiver_rank": t.get("waiverRank"),
+                          "acquisitions_season": (t.get("transactionCounter") or {}).get("acquisitions"),
+                          "acquisitions_this_matchup": ((t.get("transactionCounter") or {}).get("matchupAcquisitionTotals") or {}).get(str(league.currentMatchupPeriod), 0)})
+    # full season schedule for every team (who plays whom each matchup period, with totals so far)
+    mdata = req.league_get(params={"view": "mMatchup"}).get("schedule", [])
+    matchups = [{"period": m.get("matchupPeriodId"), "home": (m.get("home") or {}).get("teamId"), "away": (m.get("away") or {}).get("teamId"),
+                 "home_pts": round((m.get("home") or {}).get("totalPoints", 0) or 0, 1),
+                 "away_pts": round((m.get("away") or {}).get("totalPoints", 0) or 0, 1), "winner": m.get("winner")}
+                for m in mdata]
+    # NHL games per team per upcoming week (next 6 weeks), from ESPN's pro schedule
+    pro = league._get_all_pro_schedule()
+    week_games = {}
+    for tid, games in pro.items():
+        for sp, gl in games.items():
+            for g in gl or []:
+                if not g.get("date"):
+                    continue
+                d = dt.datetime.fromtimestamp(g["date"] / 1000, TZ).date()
+                if d < now.date() or (d - now.date()).days > 42:
+                    continue
+                wk = (d - dt.timedelta(days=d.weekday())).isoformat()  # Monday of that week
+                week_games.setdefault(short_team(PRO_TEAM_MAP.get(int(tid), tid)), {}).setdefault(wk, []).append(d.strftime("%a"))
+    # current matchup: both lineups with today's and matchup points
+    me = teams[TEAM_ID]
+    current = None
+    for box in league.box_scores(matchup_total=True):
+        ids = (getattr(box.home_team, "team_id", None), getattr(box.away_team, "team_id", None))
+        if TEAM_ID in ids:
+            side = "home" if ids[0] == TEAM_ID else "away"
+            other = "away" if side == "home" else "home"
+            opp = getattr(box, f"{other}_team")
+            current = {"opponent": getattr(opp, "team_name", None), "opponent_id": getattr(opp, "team_id", None),
+                       "my_points": getattr(box, f"{side}_score"), "opp_points": getattr(box, f"{other}_score"),
+                       "my_games_left": remaining_value(me["roster"], sched)[0],
+                       "opp_games_left": remaining_value(teams[opp.team_id]["roster"], sched)[0] if getattr(opp, "team_id", None) in teams else None,
+                       "opp_lineup": [{"name": p.name, "pos": POS.get(p.position, "?"), "team": short_team(p.proTeam), "slot": p.slot_position,
+                                       "status": p.injuryStatus, "matchup_points": getattr(p, "points", None)}
+                                      for p in getattr(box, f"{other}_lineup")]}
+    # recent league activity
+    activity = []
+    for act in league.recent_activity(size=50):
+        for team, action, player, *_ in act.actions:
+            activity.append({"when": dt.datetime.fromtimestamp(act.date / 1000, TZ).isoformat(timespec="minutes"),
+                             "team": getattr(team, "team_name", str(team)), "action": action, "player": getattr(player, "name", str(player))})
+    keys = ("id", "name", "pos", "team", "status", "injured", "avail", "starter", "owned_pct", "owned_change", "eligible",
+            "gp", "actual", "cur_total", "proj_total", "proj_avg", "last_gp", "last_total", "last_avg", "stats")
+    def row(p, extra=None, full=True):
+        r = {k: p.get(k) for k in keys if full or k != "stats"}
+        r["games_left"] = sched.games_left(p.get("pro_id"))
+        r["days"] = sched.days_left_for(p.get("pro_id"))
+        if extra:
+            r.update(extra)
+        return r
+    avail_sorted = sorted(fas.values(), key=season_rank, reverse=True)
+    team_names = {tid: getattr(t["team"], "team_name", str(tid)) for tid, t in teams.items()}
+    snap = {"generated": now.isoformat(), "my_team_id": TEAM_ID, "matchup_period": league.currentMatchupPeriod,
+            "scoring_period": league.current_week, "week_days": [sched.day_name.get(d, d) for d in sched.days],
+            "adds_used": adds_used(league), "stream_slots": [p["name"] for p in stream_slots(me["roster"])],
+            "league_settings": league_settings, "standings": standings, "matchups": matchups, "current_matchup": current,
+            "nhl_games_by_week": week_games, "recent_activity": activity,
+            "roster": [row(p, {"slot": p.get("slot")}) for p in me["roster"]],
+            "available": [row(f, full=(i < 250)) for i, f in enumerate(avail_sorted)],
+            "other_teams": {team_names[tid]: [row(p, {"slot": p.get("slot")}) for p in t["roster"]]
+                            for tid, t in teams.items() if tid != TEAM_ID}}
+    with open("snapshot.json", "w") as fh:
+        json.dump(snap, fh, separators=(",", ":"), default=str)
+    print(f"[snapshot] written: {len(snap['available'])} available, {len(snap['other_teams'])} other teams, "
+          f"{os.path.getsize('snapshot.json') // 1024} KB")
+
+
 # ---------- main ----------
 def main():
     mode = (sys.argv[1] if len(sys.argv) > 1 else "auto").lower()
-    if mode not in ("auto", "weekly", "daily", "hourly"):
+    if mode not in ("auto", "weekly", "daily", "hourly", "goalies", "snapshot"):
         print(f"unknown mode '{mode}', treating as auto")
         mode = "auto"
     now = dt.datetime.now(TZ)
     try:
         league = League(league_id=LEAGUE_ID, year=YEAR, espn_s2=ESPN_S2, swid=SWID)
         sched = Schedule(league)
-        fas = fetch_players(league, ["FREEAGENT", "WAIVERS"], 250)
-        rostered = fetch_players(league, ["ONTEAM"], 400)
+        fas = fetch_players(league, ["FREEAGENT", "WAIVERS"], 500)
+        rostered = fetch_players(league, ["ONTEAM"], 600)
         teams = lineups(league, rostered)
     except Exception as e:
         notify("BudLight alerts: couldn't load ESPN",
@@ -479,6 +612,14 @@ def main():
         raise
 
     state = load_state()
+    today_iso = now.date().isoformat()
+    write_snapshot = mode in ("daily", "weekly", "goalies", "snapshot") or (
+        mode == "auto" and now.hour >= 10 and state.get("last_daily") != today_iso)
+    if write_snapshot:
+        try:
+            build_snapshot(league, sched, teams, fas, rostered, now)
+        except Exception as e:
+            print(f"[snapshot] skipped ({type(e).__name__}: {e})")
     if mode == "auto":
         today = now.date().isoformat()
         run_weekly = now.weekday() == 0 and now.hour >= 7 and state.get("last_weekly") != today
@@ -498,8 +639,10 @@ def main():
         budget = WEEKLY_ADDS - (ADDS_RESERVE if len(sched.days) > 2 else 0) - adds_used(league)
         gs = goalie_stream(me, fas, {**fas, **rostered}, sched, budget)
         if gs:
-            notify("Goalie swap tonight?", gs, "high", "goal_net")
+            notify("Goalie swap tonight?", "\n\n".join(gs), "high", "goal_net")
         state["last_goalie"] = now.date().isoformat()
+    if mode == "goalies":
+        notify("Goalie report", "\n".join(goalie_report(teams[TEAM_ID], fas, sched)), "high", "goal_net")
     save_state(state)
     print(f"done: mode={mode} local={now:%a %H:%M} hourly_alerts={n} weekly={run_weekly} daily={run_daily}")
 
