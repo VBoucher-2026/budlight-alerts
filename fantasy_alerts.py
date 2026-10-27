@@ -41,7 +41,7 @@ GOALIE_SHARE = 0.65
 STEAL_MARGIN = 0.3
 BASELINE = {"F": 1.2, "D": 1.0, "G": 3.0}   # per-game value assumed for players ESPN doesn't project
 # Players the script must never suggest dropping (exact names, comma-separated; can also be set as PROTECT env var)
-PROTECT = {n.strip() for n in os.environ.get("PROTECT", "").split(",") if n.strip()}
+PROTECT = {n.strip() for n in os.environ.get("PROTECT", "Connor Hellebuyck").split(",") if n.strip()}
 
 HARD_OUT = {"OUT", "INJURY_RESERVE", "SUSPENSION"}
 STATUS_TEXT = {"OUT": "out", "INJURY_RESERVE": "on IR", "SUSPENSION": "suspended",
@@ -318,7 +318,7 @@ def goalie_stream(me, fas, everyone, sched, budget):
                 best_on_team[p["pro_id"]] = p
     pool = [f for f in fas.values() if f["group"] == "G" and healthy(f) and f["avail"] == "FREEAGENT"
             and sched.plays_today(f["pro_id"])]
-    confirmed = [f for f in pool if (f.get("starter") or "") in ("PROBABLE", "CONFIRMED", "STARTER", "P", "S")]
+    confirmed = [f for f in pool if (f.get("starter") or "") in ("EXPECTED", "PROBABLE", "CONFIRMED", "STARTER", "P", "S")]
     likely = [f for f in pool if f not in confirmed and f["pro_id"] not in sched.played_yesterday
               and best_on_team.get(f["pro_id"], {}).get("id") == f["id"]]
     ranked = sorted(confirmed, key=season_rank, reverse=True) + sorted(likely, key=season_rank, reverse=True)
@@ -326,11 +326,14 @@ def goalie_stream(me, fas, everyone, sched, budget):
     for g in sorted(idle, key=season_rank):
         if len(lines) >= budget:
             break
+        def quality(p):  # season average once he has 5+ starts, else projection-based
+            return p["actual"] if (p.get("gp") or 0) >= 5 and p.get("actual") else season_rank(p) / 55
+        ok = [c for c in ranked if quality(c) >= 0.75 * quality(g)]   # never drop a goalie for a clearly worse one
         # with adds to keep chaining, a start tonight is enough; with the last add, require more starts overall
         if budget - len(lines) >= 2:
-            f = ranked[0] if ranked else None
+            f = ok[0] if ok else None
         else:
-            f = next((c for c in ranked if sched.games_left(c["pro_id"]) > sched.games_left(g["pro_id"])), None)
+            f = next((c for c in ok if sched.games_left(c["pro_id"]) > sched.games_left(g["pro_id"])), None)
         if not f:
             continue
         ranked.remove(f)
@@ -343,7 +346,7 @@ def goalie_stream(me, fas, everyone, sched, budget):
 
 def goalie_report(me, fas, sched):
     def line(p, tag=""):
-        badge = {"PROBABLE": " · P tonight", "CONFIRMED": " · S tonight", "STARTER": " · S tonight"}.get(p.get("starter") or "", "")
+        badge = {"EXPECTED": " · P tonight", "PROBABLE": " · P tonight", "CONFIRMED": " · S tonight", "STARTER": " · S tonight"}.get(p.get("starter") or "", "")
         return (f"• {p['name']} ({p['team']}){tag}: avg {p.get('actual') or 0:.1f} over {int(p.get('gp') or 0)} gp · "
                 f"proj {p.get('proj_total') or 0:.0f} · {sched.games_left(p['pro_id'])} games left{badge}")
     mine = [p for p in me["roster"] if p["group"] == "G"]
@@ -360,8 +363,11 @@ def upgrade_moves(me, fas, budget):
     for occ in stream_slots(me["roster"]):
         if (occ.get("gp") or 0) < 10:
             continue
+        def credible(f):  # a hot month is not enough: needs a track record comparable to the player he'd replace
+            return ((f.get("proj_total") or 0) >= 0.9 * (occ.get("proj_total") or 0)
+                    or (f.get("last_avg") or 0) >= (occ.get("last_avg") or 0))
         best = max((f for f in fas.values() if f["group"] == occ["group"] and healthy(f) and f["avail"] == "FREEAGENT"
-                    and (f.get("gp") or 0) >= 10 and (f.get("actual") or 0) >= (occ.get("actual") or 0) + 0.5),
+                    and (f.get("gp") or 0) >= 10 and (f.get("actual") or 0) >= (occ.get("actual") or 0) + 0.5 and credible(f)),
                    key=lambda f: f.get("actual") or 0, default=None)
         if best:
             out.append(f"⬆️ UPGRADE: add {best['name']} ({best['pos']}, {best['team']}, {best['actual']:.2f}/g over {int(best['gp'])} gp, "
