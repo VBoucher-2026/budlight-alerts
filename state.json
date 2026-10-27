@@ -2,7 +2,8 @@
  "ir_alerts": [
   "\u2705 Zach Hyman is active again: move him o",
   "\ud83c\udfe5 Jason Robertson is IR-eligible: move h",
-  "\ud83c\udfe5 Kirill Marchenko is IR-eligible: move "
+  "\ud83c\udfe5 Kirill Marchenko is IR-eligible: move ",
+  "\u2705 Connor Hellebuyck is active again: mov"
  ],
  "last_daily": "2026-10-27",
  "last_goalie": "2026-10-26",
@@ -53,7 +54,7 @@
   "2590824": "DAY_TO_DAY",
   "2590829": "ACTIVE",
   "2610321": "ACTIVE",
-  "3020225": "OUT",
+  "3020225": "ACTIVE",
   "3041997": "ACTIVE",
   "3114770": "ACTIVE",
   "3115032": "ACTIVE",
