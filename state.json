@@ -49,6 +49,13 @@
   "4874730-6",
   "5188599-7"
  ],
+ "stash_alerted": [],
+ "stash_tracked": {
+  "2591155": "INJURY_RESERVE",
+  "3654006": "INJURY_RESERVE",
+  "3852": "INJURY_RESERVE",
+  "4272674": "INJURY_RESERVE"
+ },
  "statuses": {
   "2562629": "ACTIVE",
   "2590824": "DAY_TO_DAY",
