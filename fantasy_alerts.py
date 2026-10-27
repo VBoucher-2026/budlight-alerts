@@ -126,8 +126,17 @@ def fetch_players(league, statuses, limit):
             print(f"[goalie-flag] {p.name}: starterStatusByProGame={starter_raw}")
         last = splits.get(f"00{YEAR - 1}", {})
         own = info.get("ownership") or {}
+        inj = info.get("injuryDetails") or {}
+        ret = inj.get("expectedReturnDate")  # often [yyyy, m, d] when ESPN publishes one
+        exp_return = None
+        if isinstance(ret, list) and len(ret) == 3:
+            try:
+                exp_return = dt.date(int(ret[0]), int(ret[1]), int(ret[2])).isoformat()
+            except Exception:
+                exp_return = None
         out[pid] = {"id": pid, "name": p.name, "group": group_of(p.position), "pos": POS.get(p.position, "?"),
                     "owned_pct": round(own.get("percentOwned", 0) or 0, 1), "owned_change": round(own.get("percentChange", 0) or 0, 1),
+                    "expected_return": exp_return,
                     "eligible": p.eligibleSlots, "injured": bool(info.get("injured")),
                     "starter": None, "starter_raw": {str(k): str(v).upper() for k, v in starter_raw.items()} if isinstance(starter_raw, dict) else {},
                     "cur_total": season.get("appliedTotal") or 0, "proj_avg": proj_avg,
@@ -333,6 +342,63 @@ def role_changes(me, fas, state, everyone=None):
                    f"(last season {ppp_rate_last:.2f}); {cause}. Info only: he becomes an add if the UPGRADE rule also flags him.")
     state["seen_roles"] = seen[-300:]
     return out[:3]
+
+
+# ---------- injured free agents worth stashing ----------
+def stash_candidates(fas):
+    out = []
+    for f in fas.values():
+        if f["avail"] != "FREEAGENT" or f["status"] not in ("INJURY_RESERVE", "OUT"):
+            continue
+        if f["group"] == "G":
+            ok = (f.get("proj_avg") or 0) >= 5.0
+        else:
+            ok = (f.get("proj_avg") or 0) >= 2.3 or (f.get("last_avg") or 0) >= 2.4
+        if ok:
+            out.append(f)
+    return sorted(out, key=lambda f: (f.get("proj_avg") or 0) / (5.5 if f["group"] == "G" else 2.5), reverse=True)
+
+
+def stash_watch(me, fas, sched, state, adds_left):
+    """Alerts: (1) return date within 10 days + free IR slot, (2) tracked player activated and unowned, (3) Sunday spare add."""
+    lines = []
+    free_ir = sched.slots["IR"] - sum(p["slot"] == "IR" for p in me["roster"])
+    cands = stash_candidates(fas)
+    tracked = state.setdefault("stash_tracked", {})
+    today = dt.datetime.now(TZ).date()
+    # (2) previously tracked injured players now healthy and still free agents
+    for pid, info in list(tracked.items()):
+        f = next((x for x in fas.values() if str(x["id"]) == pid), None)
+        if f and f["avail"] == "FREEAGENT" and f["status"] in ("ACTIVE", "DAY_TO_DAY"):
+            lines.append(f"🔓 BACK FROM INJURY: {f['name']} ({f['pos']}, {f['team']}, proj {f.get('proj_avg') or 0:.2f}/g, "
+                         f"last season {f.get('last_avg') or 0:.2f}) is active and unowned. Grab him now if he beats your weakest player.")
+            tracked.pop(pid, None)
+        elif not f:
+            tracked.pop(pid, None)  # rostered by someone or gone
+    for f in cands:
+        tracked[str(f["id"])] = f["status"]
+    # (1) return date within 10 days
+    if free_ir > 0 and adds_left > 0:
+        for f in cands:
+            r = f.get("expected_return")
+            if r:
+                days = (dt.date.fromisoformat(r) - today).days
+                if 0 <= days <= 10:
+                    key = f"stash-{f['id']}-{r}"
+                    if key not in state.setdefault("stash_alerted", []):
+                        state["stash_alerted"].append(key)
+                        lines.append(f"🏥 STASH NOW: {f['name']} ({f['pos']}, {f['team']}) expected back {r}. Add him into your free "
+                                     f"IR slot while he's still IR-tagged (proj {f.get('proj_avg') or 0:.2f}/g).")
+    # (3) Sunday: spare add + free IR slot
+    if (today.weekday() == 6 and free_ir > 0 and adds_left > 0 and cands
+            and state.get("stash_sunday") != today.isoformat()):
+        state["stash_sunday"] = today.isoformat()
+        f = cands[0]
+        lines.append(f"🧺 SPARE ADD: {adds_left} add(s) expire tonight and you have a free IR slot. Best stash: {f['name']} "
+                     f"({f['pos']}, {f['team']}, proj {f.get('proj_avg') or 0:.2f}/g"
+                     + (f", expected back {f['expected_return']}" if f.get("expected_return") else "") + ").")
+    state["stash_alerted"] = state.get("stash_alerted", [])[-200:]
+    return lines
 
 
 # ---------- recommendations ----------
@@ -608,6 +674,12 @@ def hourly_checks(league, sched, teams, fas, state):
                                f"{STATUS_TEXT.get(f['status'], f['status'].lower())}. You have a free IR slot: claim him "
                                f"only if you'd want him for the second half of the season."))
     state["seen_drops"] = seen[-200:]
+    try:
+        left = WEEKLY_ADDS - adds_used(league)
+        for line in stash_watch(me, fas, sched, state, left):
+            alerts.append(("Stash watch", line))
+    except Exception as e:
+        print(f"[stash] skipped ({type(e).__name__}: {e})")
     for title, body in alerts:
         notify(title, body, "high", "rotating_light")
     return len(alerts)
