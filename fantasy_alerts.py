@@ -273,6 +273,68 @@ def adds_used(league):
     return n
 
 
+# ---------- role-change detection ----------
+SKATER_PTS = {"G": 2, "A": 1, "PPG": 1, "PPA": 1, "SHG": 2, "SHA": 1, "SOG": 0.15, "HIT": 0.25, "BLK": 0.25}
+
+
+def split_stats(p, label):
+    st = ((p.get("stats") or {}).get(label) or {}).get("total") or {}
+    return st
+
+
+def split_ppg(p, label):
+    """Fantasy points per game for a stats split under this league's scoring (skaters)."""
+    st = split_stats(p, label)
+    gp = st.get("GP") or 0
+    if not gp:
+        return 0.0, 0
+    pts = sum(SKATER_PTS[k] * (st.get(k) or 0) for k in SKATER_PTS)
+    return pts / gp, int(gp)
+
+
+def role_changes(me, fas, state, everyone=None):
+    """Free agents whose role has grown: more ice time / PP use than last season, producing 2.3+ over the last 15 games."""
+    seen = state.setdefault("seen_roles", [])
+    out = []
+    pool = everyone or fas
+    def injured_teammate(f):
+        """A notable teammate (same NHL team, projected 150+) who is Out or on IR: the likely reason for the new role."""
+        hurt = [p for p in pool.values() if p.get("pro_id") == f.get("pro_id") and p["group"] != "G"
+                and p["status"] in ("OUT", "INJURY_RESERVE") and (p.get("proj_total") or 0) >= 150]
+        return max(hurt, key=lambda p: p.get("proj_total") or 0, default=None)
+    for f in fas.values():
+        if f["group"] == "G" or not healthy(f) or f["avail"] != "FREEAGENT":
+            continue
+        now_avg, now_gp = split_ppg(f, f"Last 15 {YEAR}")
+        if now_gp < 6 or now_avg < 2.3:
+            continue
+        cur, last = split_stats(f, f"Total {YEAR}"), split_stats(f, f"Total {YEAR - 1}")
+        atoi_now, atoi_last = cur.get("ATOI") or 0, last.get("ATOI") or 0
+        ppp_rate_now = (cur.get("PPP") or 0) / max(cur.get("GP") or 1, 1)
+        ppp_rate_last = (last.get("PPP") or 0) / max(last.get("GP") or 1, 1)
+        if atoi_now < 17 * 60:
+            continue
+        if not (atoi_now - atoi_last >= 90 or ppp_rate_now >= ppp_rate_last + 0.15 or not last):
+            continue
+        # offense must be behind it: a PP role or real scoring over the stretch, not just minutes and hits
+        l15 = split_stats(f, f"Last 15 {YEAR}")
+        scoring_rate = ((l15.get("G") or 0) + (l15.get("A") or 0)) / max(l15.get("GP") or 1, 1)
+        if ppp_rate_now < 0.2 and scoring_rate < 0.5:
+            continue
+        key = f"{f['id']}-{int(now_gp)}"
+        if key in seen:
+            continue
+        seen.append(key)
+        why = injured_teammate(f)
+        cause = (f"likely injury-driven ({why['name']} out), may end when he returns" if why
+                 else "no injury behind it, likely durable (trade or coaching change)")
+        out.append(f"📈 ROLE CHANGE: {f['name']} ({f['pos']}, {f['team']}) {now_avg:.1f}/g over last {now_gp} games, "
+                   f"ice time {atoi_now / 60:.0f} min (last season {atoi_last / 60:.0f}), PP points/game {ppp_rate_now:.2f} "
+                   f"(last season {ppp_rate_last:.2f}); {cause}. Info only: he becomes an add if the UPGRADE rule also flags him.")
+    state["seen_roles"] = seen[-300:]
+    return out[:3]
+
+
 # ---------- recommendations ----------
 def fa_desc(f, sched):
     return f"{f['name']} ({f['pos']}, {f['team']}, {f['value']:.1f}/g, plays {', '.join(sched.days_left_for(f['pro_id'])) or 'no more games'})"
@@ -443,6 +505,15 @@ def weekly_plan(league, sched, teams, fas):
         parts.append(f"4-game NHL teams: {', '.join(heavy)}")
     dead = dead_spots(me, sched)
     parts += ["", "⚠️ DEAD SPOTS", *(dead or ["None"])]
+    shrinking = []
+    for p in me["roster"]:
+        if p["group"] == "G" or p["slot"] == "IR":
+            continue
+        cur, last = split_stats(p, f"Total {YEAR}"), split_stats(p, f"Total {YEAR - 1}")
+        if (cur.get("GP") or 0) >= 8 and last.get("ATOI") and (last["ATOI"] - (cur.get("ATOI") or 0)) >= 120:
+            shrinking.append(f"{p['name']}: {(cur.get('ATOI') or 0) / 60:.0f} min/game vs {last['ATOI'] / 60:.0f} last season")
+    if shrinking:
+        parts += ["", "📉 ROLE SHRINKING (consider selling while the name still carries value)", *shrinking]
     parts += ["", f"🔁 STREAMING PLAN (adds left {WEEKLY_ADDS - used}/{WEEKLY_ADDS}, keeping {ADDS_RESERVE} in reserve)"]
     moves = stream_moves(me, fas, sched, budget)
     parts += [m[1] for m in moves] or ["No stream worth making this week. Your lowest-value skaters: "
@@ -451,8 +522,9 @@ def weekly_plan(league, sched, teams, fas):
     notify("Weekly plan: " + (f"{len(moves)} move(s)" if moves else "no moves"), "\n".join(parts), "high")
 
 
-def daily_brief(league, sched, teams, fas, everyone=None):
+def daily_brief(league, sched, teams, fas, everyone=None, state=None):
     me = teams[TEAM_ID]
+    state = state if state is not None else {}
     used = adds_used(league)
     reserve = ADDS_RESERVE if len(sched.days) > 2 else 0   # adds expire Sunday night: spend them on the weekend
     budget = WEEKLY_ADDS - reserve - used
@@ -474,6 +546,13 @@ def daily_brief(league, sched, teams, fas, everyone=None):
         actions = actions + gs
     if dead:
         parts += ["", "⚠️ " + "; ".join(dead)]
+    roles = role_changes(me, fas, state, everyone)
+    if roles:
+        parts += ["", *roles]
+    left = WEEKLY_ADDS - used
+    if dt.datetime.now(TZ).weekday() >= 4 and left > 0:
+        parts += ["", f"⏳ {left} add(s) left and they expire Sunday night: spend them on confirmed weekend starters "
+                      f"(Saturday has the most games) or an IR stash."]
     parts += ["", f"Adds used {used}/{WEEKLY_ADDS}"]
     title = ("ACTION: " + (moves[0][1].split("\n")[0] if moves else actions[0][2:].split(":")[0])) if (moves or actions) \
         else "No moves today"
@@ -675,7 +754,7 @@ def main():
         weekly_plan(league, sched, teams, fas)
         state["last_weekly"] = now.date().isoformat()
     if run_daily:
-        daily_brief(league, sched, teams, fas, {**fas, **rostered})
+        daily_brief(league, sched, teams, fas, {**fas, **rostered}, state)
         state["last_daily"] = now.date().isoformat()
     if mode == "auto" and now.hour >= 15 and state.get("last_goalie") != now.date().isoformat():
         me = teams[TEAM_ID]
