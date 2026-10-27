@@ -1,7 +1,8 @@
 {
  "ir_alerts": [
   "\u2705 Zach Hyman is active again: move him o",
-  "\ud83c\udfe5 Jason Robertson is IR-eligible: move h"
+  "\ud83c\udfe5 Jason Robertson is IR-eligible: move h",
+  "\ud83c\udfe5 Kirill Marchenko is IR-eligible: move "
  ],
  "last_daily": "2026-10-26",
  "last_goalie": "2026-10-26",
@@ -40,7 +41,8 @@
   "1792852957764-Victor Hedman",
   "1793040811102-Nikolaj Ehlers",
   "1793040272324-Vince Dunn",
-  "1793040180273-John Carlson"
+  "1793040180273-John Carlson",
+  "1793068931476-Gabriel Landeskog"
  ],
  "statuses": {
   "2562629": "ACTIVE",
@@ -62,7 +64,7 @@
   "4378656": "ACTIVE",
   "4565234": "ACTIVE",
   "4587588": "ACTIVE",
-  "4587996": "ACTIVE",
+  "4587996": "OUT",
   "4874740": "ACTIVE",
   "4874919": "ACTIVE",
   "5080145": "ACTIVE",
