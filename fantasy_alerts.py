@@ -33,7 +33,7 @@ STATE_PATH = "state.json"
 STREAM_SLOTS = 2        # your N lowest-value healthy skaters are the only ones ever suggested as drops
 STREAM_SKATERS = os.environ.get("STREAM_SKATERS", "0") == "1"   # schedule-based skater swaps off; upgrades only
 WEEKLY_ADDS = 7         # league limit per matchup week
-ADDS_RESERVE = 2        # keep this many adds unused for emergencies (injuries)
+ADDS_RESERVE = 1        # keep this many adds unused Mon-Fri for injuries; released on the weekend
 MIN_GAIN = 4.0          # a skater add must gain this many points this week (a goalie start is worth ~4.5)
 MIN_QUALITY = 0.85      # the pickup must project to at least 85% of the dropped player's per-game value
 PRIOR_GAMES = 10        # blend actual FP/G with ESPN's projection as if the projection were 10 games
@@ -252,6 +252,33 @@ def remaining_value(roster, sched):
     return games, points
 
 
+HOLD = {n.strip() for n in os.environ.get("HOLD", "").split(",") if n.strip()}   # manual: players in offers
+
+
+def pending_trade_players(league):
+    """Your players currently in pending trade offers (ESPN pendingTransactions), so the script never drops them."""
+    names = set()
+    try:
+        data = league.espn_request.league_get(params={"view": "mPendingTransactions"})
+        id_to_name = {}
+        for t in data.get("teams", []):
+            for e in (t.get("roster") or {}).get("entries", []):
+                pl = (e.get("playerPoolEntry") or {}).get("player") or {}
+                id_to_name[pl.get("id")] = pl.get("fullName")
+        for tx in data.get("pendingTransactions", []) or data.get("transactions", []) or []:
+            if tx.get("status") not in (None, "PENDING", "PROPOSED"):
+                continue
+            for it in tx.get("items", []) or []:
+                if it.get("fromTeamId") == TEAM_ID:
+                    n = id_to_name.get(it.get("playerId"))
+                    if n:
+                        names.add(n)
+    except Exception as e:
+        print(f"[pending] could not read pending trades ({type(e).__name__})")
+    print(f"[pending] players in your pending offers: {sorted(names) or 'none detected'}")
+    return names
+
+
 def stream_slots(roster):
     """Your N healthy skaters with the lowest ESPN season projection, the only ones ever suggested as drops.
     Uses the projection (not the early-season blend) so a star's slow start can't make him droppable."""
@@ -435,7 +462,14 @@ def goalie_stream(me, fas, everyone, sched, budget):
     goalies = [p for p in me["roster"] if p["group"] == "G" and p["slot"] != "IR"]
     print("[goalies] " + ", ".join(f"{p['name']} proj={p.get('proj_total') or 0:.0f} avg={p.get('actual') or 0:.1f} rank={season_rank(p):.0f}"
                                   for p in goalies))
+    # how many goalie slots would be empty tonight even after benching/unbenching your own goalies
+    playing_tonight = [p for p in goalies if healthy(p) and sched.plays_today(p["pro_id"])]
+    open_slots = max(0, sched.slots["G"] - len(playing_tonight))
     idle = [p for p in goalies if p["name"] not in PROTECT and not sched.plays_today(p["pro_id"])]
+    # drop the benched / lowest-value idle goalie first
+    idle.sort(key=lambda p: (p["slot"] != "Bench", season_rank(p)))
+    idle = idle[:open_slots]
+    print(f"[goalies] playing tonight: {[p['name'] for p in playing_tonight]}, open slots: {open_slots}")
     if not idle or budget <= 0:
         return []
     best_on_team = {}
@@ -451,7 +485,7 @@ def goalie_stream(me, fas, everyone, sched, budget):
               and best_on_team.get(f["pro_id"], {}).get("id") == f["id"]]
     ranked = sorted(confirmed, key=season_rank, reverse=True) + sorted(likely, key=season_rank, reverse=True)
     lines = []
-    for g in sorted(idle, key=season_rank):
+    for g in idle:
         if len(lines) >= budget:
             break
         def quality(p):  # season average once he has 5+ starts, else projection-based
@@ -469,6 +503,22 @@ def goalie_stream(me, fas, everyone, sched, budget):
                else "his team's No. 1, plays tonight, no back-to-back; confirm the P/S badge first")
         lines.append(f"🥅 {g['name']} has no game today → drop him, add {f['name']} ({f['team']}): {how}. "
                      f"Games left this week: {f['name']} {sched.games_left(f['pro_id'])}, {g['name']} {sched.games_left(g['pro_id'])}.")
+    return lines
+
+
+def goalie_bench_swap(me, sched):
+    """Carrying 3 goalies: if a benched goalie plays tonight and a slotted one doesn't, say which to swap."""
+    gs = [p for p in me["roster"] if p["group"] == "G" and p["slot"] != "IR"]
+    benched = [p for p in gs if p["slot"] == "Bench"]
+    slotted = [p for p in gs if p["slot"] != "Bench"]
+    lines = []
+    for b in benched:
+        if not sched.plays_today(b["pro_id"]) or not healthy(b):
+            continue
+        idle = [p for p in slotted if not sched.plays_today(p["pro_id"])]
+        if idle:
+            lines.append(f"🔀 Goalie swap (no add): start {b['name']}, bench {idle[0]['name']} (no game today). "
+                         f"Check {b['name']}'s P/S badge first.")
     return lines
 
 
@@ -571,6 +621,15 @@ def weekly_plan(league, sched, teams, fas):
         parts.append(f"4-game NHL teams: {', '.join(heavy)}")
     dead = dead_spots(me, sched)
     parts += ["", "⚠️ DEAD SPOTS", *(dead or ["None"])]
+    anchor = next((p for p in me["roster"] if p["group"] == "G" and p["name"] in PROTECT and p["slot"] != "IR"), None)
+    nights = []
+    for sp in sched.days:
+        n_teams = len(sched.all_games.get(sp, set()))
+        tag = "light" if n_teams <= 10 else ""
+        a_plays = anchor and anchor.get("pro_id") in sched.all_games.get(sp, set())
+        nights.append(f"{sched.day_name.get(sp, sp)}: {n_teams // 2} games{' (' + tag + ')' if tag else ''}"
+                      f"{', ' + anchor['name'].split()[-1] + ' plays' if a_plays else ''}")
+    parts += ["", "🥅 GOALIE STREAM WEEK (slot 2 gets a confirmed starter each night; light nights may have none)", *nights]
     shrinking = []
     for p in me["roster"]:
         if p["group"] == "G" or p["slot"] == "IR":
@@ -606,7 +665,7 @@ def daily_brief(league, sched, teams, fas, everyone=None, state=None):
         actions = actions + ups
     if moves:
         parts += ["", "🔁 TODAY'S MOVE", moves[0][1]]
-    gs = goalie_stream(me, fas, everyone or fas, sched, budget)
+    gs = goalie_bench_swap(me, sched) + goalie_stream(me, fas, everyone or fas, sched, budget)
     if gs:
         parts += ["", *gs]
         actions = actions + gs
@@ -799,6 +858,7 @@ def main():
         sched.resolve_starters(fas)
         sched.resolve_starters(rostered)
         teams = lineups(league, rostered)
+        PROTECT.update(HOLD | pending_trade_players(league))
     except Exception as e:
         notify("BudLight alerts: couldn't load ESPN",
                f"{type(e).__name__}: {e}\n\nIf this repeats, the espn_s2 / SWID cookies have probably expired.",
@@ -828,13 +888,15 @@ def main():
     if run_daily:
         daily_brief(league, sched, teams, fas, {**fas, **rostered}, state)
         state["last_daily"] = now.date().isoformat()
-    if mode == "auto" and now.hour >= 15 and state.get("last_goalie") != now.date().isoformat():
+    if mode == "auto" and 11 <= now.hour <= 18 and state.get("last_goalie") != now.date().isoformat():
         me = teams[TEAM_ID]
         budget = WEEKLY_ADDS - (ADDS_RESERVE if len(sched.days) > 2 else 0) - adds_used(league)
-        gs = goalie_stream(me, fas, {**fas, **rostered}, sched, budget)
+        gs = goalie_bench_swap(me, sched) + goalie_stream(me, fas, {**fas, **rostered}, sched, budget)
         if gs:
-            notify("Goalie swap tonight?", "\n\n".join(gs), "high", "goal_net")
-        state["last_goalie"] = now.date().isoformat()
+            notify("Goalie move tonight", "\n\n".join(gs), "high", "goal_net")
+            state["last_goalie"] = now.date().isoformat()
+        elif now.hour == 18:
+            state["last_goalie"] = now.date().isoformat()   # nothing found today; stop checking
     if mode == "goalies":
         notify("Goalie report", "\n".join(goalie_report(teams[TEAM_ID], fas, sched)), "high", "goal_net")
     save_state(state)
