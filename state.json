@@ -5,7 +5,7 @@
   "\ud83c\udfe5 Kirill Marchenko is IR-eligible: move ",
   "\u2705 Connor Hellebuyck is active again: mov"
  ],
- "last_daily": "2026-10-28",
+ "last_daily": "2026-10-29",
  "last_goalie": "2026-10-28",
  "last_weekly": "2026-10-26",
  "seen_drops": [
@@ -52,7 +52,11 @@
   "3899979-7",
   "3899949-6",
   "4781553-6",
-  "5149231-6"
+  "5149231-6",
+  "3042088-6",
+  "3899979-6",
+  "4697399-6",
+  "4874864-6"
  ],
  "stash_alerted": [],
  "stash_tracked": {
