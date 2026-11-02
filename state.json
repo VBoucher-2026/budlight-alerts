@@ -8,6 +8,12 @@
  "last_daily": "2026-11-02",
  "last_goalie": "2026-10-31",
  "last_weekly": "2026-10-26",
+ "news_last": "2026-11-02T13:30:38.316457-05:00",
+ "news_seen": [
+  "3852-Head coach Paul Maurice said Friday that Marchand (leg) is e",
+  "3654006-Lyon (upper body) was spotted practicing at Tuesday's option",
+  "3654006-Lyon (upper body) was put on injured reserve Thursday, Matth"
+ ],
  "seen_drops": [
   "1791325960449-Aleksander Barkov",
   "1791421390596-Noah Hanifin",
@@ -73,11 +79,26 @@
  "stash_alerted": [],
  "stash_sunday": "2026-11-01",
  "stash_tracked": {
-  "2591155": "INJURY_RESERVE",
-  "3654006": "INJURY_RESERVE",
-  "3852": "INJURY_RESERVE",
-  "4272674": "INJURY_RESERVE",
-  "5509": "INJURY_RESERVE"
+  "2591155": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "3654006": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "3852": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "4272674": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "5509": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  }
  },
  "statuses": {
   "2562629": "ACTIVE",
