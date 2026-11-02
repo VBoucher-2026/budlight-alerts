@@ -253,7 +253,7 @@ def remaining_value(roster, sched):
 
 
 # Players in trade offers you've sent (edit this list when offers are sent or settled)
-HOLD = {n.strip() for n in os.environ.get("HOLD", "Jacob Fowler, Nick Schmaltz, Brandon Montour").split(",") if n.strip()}
+HOLD = {n.strip() for n in os.environ.get("HOLD", "").split(",") if n.strip()}
 
 
 def pending_trade_players(league):
