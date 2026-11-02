@@ -641,9 +641,10 @@ def goalie_stream(me, fas, everyone, sched, budget):
     for g in idle:
         if len(lines) >= budget:
             break
-        def quality(p):  # season average once he has 5+ starts, else projection-based
-            return p["actual"] if (p.get("gp") or 0) >= 5 and p.get("actual") else season_rank(p) / 55
-        ok = [c for c in ranked if quality(c) >= 0.75 * quality(g)]   # never drop a goalie for a clearly worse one
+        def quality(p):  # realistic per-start level: this season blended with projection (or last season)
+            return blend_value(p)
+        # never stream a clearly bad goalie, and don't drop a goalie for one far below his realistic level
+        ok = [c for c in ranked if quality(c) >= max(4.0, 0.75 * quality(g))]
         # with adds to keep chaining, a start tonight is enough; with the last add, require more starts overall
         if budget - len(lines) >= 2:
             f = ok[0] if ok else None
@@ -654,7 +655,8 @@ def goalie_stream(me, fas, everyone, sched, budget):
         ranked.remove(f)
         how = (f"ESPN lists him as {f['starter'].lower()} starter tonight" if f in confirmed
                else "his team's No. 1, plays tonight, no back-to-back; confirm the P/S badge first")
-        lines.append(f"🥅 {g['name']} has no game today → drop him, add {f['name']} ({f['team']}): {how}. "
+        why = "has no game today" if not sched.plays_today(g["pro_id"]) else "isn't his team's starter tonight"
+        lines.append(f"🥅 {g['name']} {why} → drop him, add {f['name']} ({f['team']}, ~{quality(f):.1f}/start): {how}. "
                      f"Games left this week: {f['name']} {sched.games_left(f['pro_id'])}, {g['name']} {sched.games_left(g['pro_id'])}.")
     return lines
 
