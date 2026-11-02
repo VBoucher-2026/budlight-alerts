@@ -252,7 +252,8 @@ def remaining_value(roster, sched):
     return games, points
 
 
-HOLD = {n.strip() for n in os.environ.get("HOLD", "").split(",") if n.strip()}   # manual: players in offers
+# Players in trade offers you've sent (edit this list when offers are sent or settled)
+HOLD = {n.strip() for n in os.environ.get("HOLD", "Jacob Fowler, Nick Schmaltz, Brandon Montour").split(",") if n.strip()}
 
 
 def pending_trade_players(league):
@@ -372,60 +373,195 @@ def role_changes(me, fas, state, everyone=None):
 
 
 # ---------- injured free agents worth stashing ----------
-def stash_candidates(fas):
+IR_RANK = {"INJURY_RESERVE": 3, "OUT": 2, "DAY_TO_DAY": 1, "ACTIVE": 0}
+
+
+def stash_candidates(fas, me=None):
+    """Injured free agents who would improve your lineup once healthy: their normal level (best of ESPN projection
+    and last season) beats your weakest healthy player at the position by 0.2+/game (goalies: 5.0+ a start)."""
+    weakest = {}
+    if me:
+        for g in ("F", "D"):
+            vals = [blend_value(p) for p in me["roster"] if p["group"] == g and p["slot"] != "IR" and healthy(p)]
+            weakest[g] = min(vals) if vals else 2.0
     out = []
     for f in fas.values():
-        if f["avail"] != "FREEAGENT" or f["status"] not in ("INJURY_RESERVE", "OUT"):
+        if f["avail"] != "FREEAGENT" or f["status"] not in ("INJURY_RESERVE", "OUT", "SUSPENSION"):
             continue
+        norm = max(f.get("proj_avg") or 0, f.get("last_avg") or 0)
         if f["group"] == "G":
             ok = (f.get("proj_avg") or 0) >= 5.0
         else:
-            ok = (f.get("proj_avg") or 0) >= 2.3 or (f.get("last_avg") or 0) >= 2.4
+            ok = norm >= weakest.get(f["group"], 2.2) + 0.2
         if ok:
             out.append(f)
-    return sorted(out, key=lambda f: (f.get("proj_avg") or 0) / (5.5 if f["group"] == "G" else 2.5), reverse=True)
+    return sorted(out, key=lambda f: max(f.get("proj_avg") or 0, f.get("last_avg") or 0) / (5.5 if f["group"] == "G" else 2.5),
+                  reverse=True)
+
+
+def blend_value(p):
+    now = p.get("actual") or 0
+    gp = p.get("gp") or 0
+    pg = p.get("proj_avg") or p.get("last_avg") or now
+    w = min(gp, 20) / 40
+    return w * now + (1 - w) * pg
 
 
 def stash_watch(me, fas, sched, state, adds_left):
-    """Alerts: (1) return date within 10 days + free IR slot, (2) tracked player activated and unowned, (3) Sunday spare add."""
+    """Injury watch on free agents who'd upgrade your lineup:
+    (1) status improves (IR -> Out/DTD, Out -> DTD) or return date moves earlier: heads-up, stash while still IR-tagged
+    (2) return date within 14 days and you have a free IR slot: stash now
+    (3) back from injury and still unowned: grab now (needs a roster spot; names your weakest player at the position)
+    (4) Sunday with a spare add and a free IR slot: best stash"""
     lines = []
     free_ir = sched.slots["IR"] - sum(p["slot"] == "IR" for p in me["roster"])
-    cands = stash_candidates(fas)
-    tracked = state.setdefault("stash_tracked", {})
+    cands = stash_candidates(fas, me)
+    tracked = state.setdefault("stash_tracked", {})       # pid -> {"status":..., "ret":...}
+    alerted = state.setdefault("stash_alerted", [])
     today = dt.datetime.now(TZ).date()
-    # (2) previously tracked injured players now healthy and still free agents
+
+    def weakest_at(group):
+        pool = [p for p in me["roster"] if p["group"] == group and p["slot"] != "IR" and p["name"] not in PROTECT]
+        return min(pool, key=blend_value, default=None)
+
+    def norm(f):
+        return max(f.get("proj_avg") or 0, f.get("last_avg") or 0)
+
+    # (3) tracked players now healthy and unowned
     for pid, info in list(tracked.items()):
         f = next((x for x in fas.values() if str(x["id"]) == pid), None)
-        if f and f["avail"] == "FREEAGENT" and f["status"] in ("ACTIVE", "DAY_TO_DAY"):
-            lines.append(f"🔓 BACK FROM INJURY: {f['name']} ({f['pos']}, {f['team']}, proj {f.get('proj_avg') or 0:.2f}/g, "
-                         f"last season {f.get('last_avg') or 0:.2f}) is active and unowned. Grab him now if he beats your weakest player.")
+        if not f:
+            tracked.pop(pid, None)   # someone rostered him
+            continue
+        if f["avail"] == "FREEAGENT" and f["status"] in ("ACTIVE", "DAY_TO_DAY") and f["group"] != "G":
+            w = weakest_at(f["group"])
+            drop = f" Drop {w['name']} ({blend_value(w):.2f}/g realistic)." if w and norm(f) > blend_value(w) + 0.2 else ""
+            if drop:
+                lines.append(f"🔓 BACK FROM INJURY: {f['name']} ({f['pos']}, {f['team']}) is {f['status'].lower().replace('_', '-')} "
+                             f"and unowned. Normal level {norm(f):.2f}/g.{drop}")
             tracked.pop(pid, None)
-        elif not f:
-            tracked.pop(pid, None)  # rostered by someone or gone
+
     for f in cands:
-        tracked[str(f["id"])] = f["status"]
-    # (1) return date within 10 days
+        pid = str(f["id"])
+        prev = tracked.get(pid) if isinstance(tracked.get(pid), dict) else None
+        cur = {"status": f["status"], "ret": f.get("expected_return")}
+        if prev:
+            improved = IR_RANK.get(cur["status"], 0) < IR_RANK.get(prev.get("status"), 0)
+            earlier = (cur["ret"] and prev.get("ret") and
+                       (dt.date.fromisoformat(prev["ret"]) - dt.date.fromisoformat(cur["ret"])).days >= 3)
+            if improved or earlier:
+                key = f"chg-{pid}-{cur['status']}-{cur['ret']}"
+                if key not in alerted:
+                    alerted.append(key)
+                    what = (f"status {prev.get('status', '?').lower()} → {cur['status'].lower()}" if improved
+                            else f"return moved up to {cur['ret']}")
+                    tip = (" Still IR-tagged: you can stash him in a free IR slot now." if cur["status"] in ("INJURY_RESERVE", "OUT")
+                           and free_ir > 0 else "")
+                    lines.append(f"🩺 INJURY WATCH: {f['name']} ({f['pos']}, {f['team']}, normal level {norm(f):.2f}/g): {what}.{tip}")
+        tracked[pid] = cur
+
+    # (2) return within 14 days + free IR slot
     if free_ir > 0 and adds_left > 0:
         for f in cands:
             r = f.get("expected_return")
-            if r:
-                days = (dt.date.fromisoformat(r) - today).days
-                if 0 <= days <= 10:
-                    key = f"stash-{f['id']}-{r}"
-                    if key not in state.setdefault("stash_alerted", []):
-                        state["stash_alerted"].append(key)
-                        lines.append(f"🏥 STASH NOW: {f['name']} ({f['pos']}, {f['team']}) expected back {r}. Add him into your free "
-                                     f"IR slot while he's still IR-tagged (proj {f.get('proj_avg') or 0:.2f}/g).")
-    # (3) Sunday: spare add + free IR slot
+            if r and 0 <= (dt.date.fromisoformat(r) - today).days <= 14:
+                key = f"stash-{f['id']}-{r}"
+                if key not in alerted:
+                    alerted.append(key)
+                    lines.append(f"🏥 STASH NOW: {f['name']} ({f['pos']}, {f['team']}) expected back {r}, normal level "
+                                 f"{norm(f):.2f}/g. Add him into your free IR slot while he's still IR-tagged.")
+    # (4) Sunday spare add
     if (today.weekday() == 6 and free_ir > 0 and adds_left > 0 and cands
             and state.get("stash_sunday") != today.isoformat()):
         state["stash_sunday"] = today.isoformat()
         f = cands[0]
         lines.append(f"🧺 SPARE ADD: {adds_left} add(s) expire tonight and you have a free IR slot. Best stash: {f['name']} "
-                     f"({f['pos']}, {f['team']}, proj {f.get('proj_avg') or 0:.2f}/g"
+                     f"({f['pos']}, {f['team']}, normal level {norm(f):.2f}/g"
                      + (f", expected back {f['expected_return']}" if f.get("expected_return") else "") + ").")
-    state["stash_alerted"] = state.get("stash_alerted", [])[-200:]
+    state["stash_alerted"] = alerted[-300:]
     return lines
+
+
+# ---------- injury news (TEST: does ESPN expose player news?) ----------
+import re as _re
+NEWS_URLS = [
+    "https://site.api.espn.com/apis/fantasy/v2/games/fhl/news/players?playerId={pid}&limit=5",
+    "https://site.web.api.espn.com/apis/fantasy/v2/games/fhl/news/players?playerId={pid}&limit=5",
+    "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fhl/news/players?playerId={pid}",
+]
+GOOD_NEWS = _re.compile(r"practic|skat|full[- ]contact|non-contact|line rushes|rejoin|activated|game-time|"
+                        r"expected to (play|return|suit)|could (play|return)|return(s|ing)? (to|on|vs)|cleared|"
+                        r"travel(s|ing|ed)? with|close to return|nearing|getting close|in the lineup", _re.I)
+BAD_NEWS = _re.compile(r"setback|surgery|out for (the )?season|season-ending|long-term|week-to-week", _re.I)
+
+
+def _news_items(js):
+    """Pull (headline, text, date) from whatever shape ESPN returns."""
+    out = []
+    feed = js.get("feed") or js.get("news") or js.get("items") or js.get("articles") or []
+    if isinstance(js, list):
+        feed = js
+    for it in feed if isinstance(feed, list) else []:
+        if not isinstance(it, dict):
+            continue
+        head = it.get("headline") or it.get("title") or ""
+        text = " ".join(str(it.get(k) or "") for k in ("story", "description", "body", "premium"))
+        date = it.get("published") or it.get("lastModified") or it.get("date") or ""
+        if head or text:
+            out.append((head.strip(), _re.sub(r"<[^>]+>", " ", text).strip(), str(date)[:10]))
+    return out
+
+
+def fetch_player_news(pid):
+    for url in NEWS_URLS:
+        try:
+            r = requests.get(url.format(pid=pid), timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code != 200:
+                print(f"[news] {url.split('/apis')[0]} -> HTTP {r.status_code}")
+                continue
+            items = _news_items(r.json())
+            print(f"[news] {url.split('/apis')[0]} -> OK, {len(items)} items for player {pid}")
+            if items:
+                return items
+        except Exception as e:
+            print(f"[news] {url.split('/apis')[0]} -> {type(e).__name__}")
+    return []
+
+
+def news_watch(me, fas, state):
+    """Every 3 hours: read ESPN news for injured free agents worth stashing; alert on return signals
+    (practiced, skating, rejoined line, game-time decision...) before ESPN changes the status tag."""
+    now = dt.datetime.now(TZ)
+    last = state.get("news_last")
+    if last and (now - dt.datetime.fromisoformat(last)).total_seconds() < 3 * 3600:
+        return []
+    state["news_last"] = now.isoformat()
+    seen = state.setdefault("news_seen", [])
+    lines = []
+    for f in stash_candidates(fas, me)[:12]:
+        for head, text, date in fetch_player_news(f["id"])[:3]:
+            blob = f"{head} {text}"
+            key = f"{f['id']}-{head[:60]}"
+            if key in seen or not GOOD_NEWS.search(blob) or BAD_NEWS.search(blob):
+                continue
+            seen.append(key)
+            norm = max(f.get("proj_avg") or 0, f.get("last_avg") or 0)
+            lines.append(f"📰 RETURN SIGNAL: {f['name']} ({f['pos']}, {f['team']}, normal {norm:.2f}/g, "
+                         f"ESPN status {f['status'].lower().replace('_', ' ')}): {head or text[:120]} ({date}). "
+                         + ("Still IR-tagged: stash him in your free IR slot now." if f["status"] in ("INJURY_RESERVE", "OUT")
+                            else "Not IR-eligible anymore: he needs a roster spot."))
+    state["news_seen"] = seen[-300:]
+    return lines
+
+
+def injury_watch_list(me, fas):
+    """For the Monday plan: injured free agents worth watching, with expected return dates."""
+    out = []
+    for f in stash_candidates(fas, me)[:8]:
+        r = f.get("expected_return") or "no date"
+        out.append(f"{f['name']} ({f['pos']}, {f['team']}): {f['status'].lower().replace('_', ' ')}, back {r}, "
+                   f"normal {max(f.get('proj_avg') or 0, f.get('last_avg') or 0):.2f}/g")
+    return out
 
 
 # ---------- recommendations ----------
@@ -463,9 +599,9 @@ def goalie_stream(me, fas, everyone, sched, budget):
     print("[goalies] " + ", ".join(f"{p['name']} proj={p.get('proj_total') or 0:.0f} avg={p.get('actual') or 0:.1f} rank={season_rank(p):.0f}"
                                   for p in goalies))
     # how many goalie slots would be empty tonight even after benching/unbenching your own goalies
-    playing_tonight = [p for p in goalies if healthy(p) and sched.plays_today(p["pro_id"])]
+    playing_tonight = [p for p in goalies if starting_tonight(p, sched)]
     open_slots = max(0, sched.slots["G"] - len(playing_tonight))
-    idle = [p for p in goalies if p["name"] not in PROTECT and not sched.plays_today(p["pro_id"])]
+    idle = [p for p in goalies if p["name"] not in PROTECT and not starting_tonight(p, sched)]
     # drop the benched / lowest-value idle goalie first
     idle.sort(key=lambda p: (p["slot"] != "Bench", season_rank(p)))
     idle = idle[:open_slots]
@@ -506,6 +642,26 @@ def goalie_stream(me, fas, everyone, sched, budget):
     return lines
 
 
+START_BADGES = ("EXPECTED", "PROBABLE", "CONFIRMED", "STARTER", "P", "S")
+TEAM_STARTER = {}   # pro_id -> name of the goalie ESPN lists as starting tonight (filled in main)
+
+
+def build_team_starters(pool):
+    TEAM_STARTER.clear()
+    for p in pool.values():
+        if p.get("group") == "G" and (p.get("starter") or "") in START_BADGES and p.get("pro_id"):
+            TEAM_STARTER[p["pro_id"]] = p["name"]
+
+
+def starting_tonight(p, sched):
+    """True if his team plays and no other goalie on his team has tonight's starter badge.
+    (Before badges are posted, a goalie whose team plays counts as starting.)"""
+    if not sched.plays_today(p.get("pro_id")) or not healthy(p):
+        return False
+    listed = TEAM_STARTER.get(p.get("pro_id"))
+    return listed is None or listed == p["name"]
+
+
 def goalie_bench_swap(me, sched):
     """Carrying 3 goalies: if a benched goalie plays tonight and a slotted one doesn't, say which to swap."""
     gs = [p for p in me["roster"] if p["group"] == "G" and p["slot"] != "IR"]
@@ -513,12 +669,12 @@ def goalie_bench_swap(me, sched):
     slotted = [p for p in gs if p["slot"] != "Bench"]
     lines = []
     for b in benched:
-        if not sched.plays_today(b["pro_id"]) or not healthy(b):
+        if not starting_tonight(b, sched):
             continue
-        idle = [p for p in slotted if not sched.plays_today(p["pro_id"])]
+        idle = [p for p in slotted if not starting_tonight(p, sched)]
         if idle:
-            lines.append(f"🔀 Goalie swap (no add): start {b['name']}, bench {idle[0]['name']} (no game today). "
-                         f"Check {b['name']}'s P/S badge first.")
+            why = "no game today" if not sched.plays_today(idle[0]["pro_id"]) else "not his team's starter tonight"
+            lines.append(f"🔀 Goalie swap (no add): start {b['name']}, bench {idle[0]['name']} ({why}).")
     return lines
 
 
@@ -643,6 +799,9 @@ def weekly_plan(league, sched, teams, fas):
     moves = stream_moves(me, fas, sched, budget)
     parts += [m[1] for m in moves] or ["No stream worth making this week. Your lowest-value skaters: "
                                         + ", ".join(f"{p['name']} ({p['value']:.1f}/g)" for p in stream_slots(me["roster"]))]
+    watch = injury_watch_list(me, fas)
+    if watch:
+        parts += ["", "🩺 INJURY WATCH (free agents who'd upgrade you when healthy)", *watch]
     parts += ["", "🏒 MATCHUP", *matchup_lines(league, sched, teams)]
     notify("Weekly plan: " + (f"{len(moves)} move(s)" if moves else "no moves"), "\n".join(parts), "high")
 
@@ -737,6 +896,8 @@ def hourly_checks(league, sched, teams, fas, state):
         left = WEEKLY_ADDS - adds_used(league)
         for line in stash_watch(me, fas, sched, state, left):
             alerts.append(("Stash watch", line))
+        for line in news_watch(me, fas, state):
+            alerts.append(("Injury news", line))
     except Exception as e:
         print(f"[stash] skipped ({type(e).__name__}: {e})")
     for title, body in alerts:
@@ -857,6 +1018,7 @@ def main():
         rostered = fetch_players(league, ["ONTEAM"], 600)
         sched.resolve_starters(fas)
         sched.resolve_starters(rostered)
+        build_team_starters({**fas, **rostered})
         teams = lineups(league, rostered)
         PROTECT.update(HOLD | pending_trade_players(league))
     except Exception as e:
