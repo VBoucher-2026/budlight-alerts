@@ -492,7 +492,11 @@ NEWS_URLS = [
 GOOD_NEWS = _re.compile(r"practic|skat|full[- ]contact|non-contact|line rushes|rejoin|activated|game-time|"
                         r"expected to (play|return|suit)|could (play|return)|return(s|ing)? (to|on|vs)|cleared|"
                         r"travel(s|ing|ed)? with|close to return|nearing|getting close|in the lineup", _re.I)
-BAD_NEWS = _re.compile(r"setback|surgery|out for (the )?season|season-ending|long-term|week-to-week", _re.I)
+BAD_NEWS = _re.compile(r"setback|surgery|out for (the )?season|season-ending|long-term|week-to-week|"
+                       r"(expected to|will|to) miss|miss (approximately|about|at least|another|the next)|"
+                       r"(placed|put|moved|landed) on (long-term )?injured reserve|out (at least )?\d+ (days|weeks)|"
+                       r"won't (play|return)|ruled out|not expected", _re.I)
+NEWS_MAX_AGE_DAYS = 3
 
 
 def _news_items(js):
@@ -538,11 +542,22 @@ def news_watch(me, fas, state):
     state["news_last"] = now.isoformat()
     seen = state.setdefault("news_seen", [])
     lines = []
+    today = now.date()
     for f in stash_candidates(fas, me)[:12]:
-        for head, text, date in fetch_player_news(f["id"])[:3]:
-            blob = f"{head} {text}"
+        items = fetch_player_news(f["id"])
+        # newest item only: if the latest news isn't a return signal, an older positive item is stale
+        items = sorted(items, key=lambda x: x[2], reverse=True)[:1]
+        for head, text, date in items:
+            try:
+                age = (today - dt.date.fromisoformat(date)).days
+            except Exception:
+                age = 99
+            first = text.split(". ")[0] if text else ""
             key = f"{f['id']}-{head[:60]}"
-            if key in seen or not GOOD_NEWS.search(blob) or BAD_NEWS.search(blob):
+            print(f"[news] {f['name']}: newest {date} ({age}d old): {head[:90]}")
+            if key in seen or age > NEWS_MAX_AGE_DAYS:
+                continue
+            if not GOOD_NEWS.search(head) or BAD_NEWS.search(f"{head} {first}"):
                 continue
             seen.append(key)
             norm = max(f.get("proj_avg") or 0, f.get("last_avg") or 0)
