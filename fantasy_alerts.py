@@ -537,7 +537,9 @@ def news_watch(me, fas, state):
     (practiced, skating, rejoined line, game-time decision...) before ESPN changes the status tag."""
     now = dt.datetime.now(TZ)
     last = state.get("news_last")
-    if last and (now - dt.datetime.fromisoformat(last)).total_seconds() < 3 * 3600:
+    manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"   # "Run workflow" button: always check
+    if last and not manual and (now - dt.datetime.fromisoformat(last)).total_seconds() < 3 * 3600:
+        print("[news] skipped (checked less than 3 hours ago)")
         return []
     state["news_last"] = now.isoformat()
     seen = state.setdefault("news_seen", [])
