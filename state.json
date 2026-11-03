@@ -6,9 +6,9 @@
   "\u2705 Connor Hellebuyck is active again: mov"
  ],
  "last_daily": "2026-11-03",
- "last_goalie": "2026-11-02",
+ "last_goalie": "2026-11-03",
  "last_weekly": "2026-11-02",
- "news_last": "2026-11-03T13:17:56.587343-05:00",
+ "news_last": "2026-11-03T18:54:08.483011-05:00",
  "news_seen": [
   "3852-Head coach Paul Maurice said Friday that Marchand (leg) is e",
   "3654006-Lyon (upper body) was spotted practicing at Tuesday's option",
@@ -132,6 +132,7 @@
   "5188437": "ACTIVE",
   "5452": "ACTIVE",
   "5509": "DAY_TO_DAY",
+  "5622": "ACTIVE",
   "5798": "ACTIVE"
  }
 }
