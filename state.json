@@ -8,7 +8,7 @@
  "last_daily": "2026-11-08",
  "last_goalie": "2026-11-08",
  "last_weekly": "2026-11-02",
- "news_last": "2026-11-08T19:39:49.457550-05:00",
+ "news_last": "2026-11-09T01:08:38.865883-05:00",
  "news_seen": [
   "3852-Head coach Paul Maurice said Friday that Marchand (leg) is e",
   "3654006-Lyon (upper body) was spotted practicing at Tuesday's option",
@@ -94,7 +94,43 @@
  "stash_alerted": [],
  "stash_sunday": "2026-11-08",
  "stash_tracked": {
+  "2562606": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
   "2591155": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "2993474": {
+   "ret": null,
+   "status": "OUT"
+  },
+  "3042014": {
+   "ret": null,
+   "status": "OUT"
+  },
+  "3042017": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "3042037": {
+   "ret": null,
+   "status": "OUT"
+  },
+  "3114743": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "3114777": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "3541": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "3648015": {
    "ret": null,
    "status": "INJURY_RESERVE"
   },
@@ -106,7 +142,79 @@
    "ret": null,
    "status": "INJURY_RESERVE"
   },
+  "3899946": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "3904098": {
+   "ret": null,
+   "status": "OUT"
+  },
+  "3942905": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "4233648": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "4233668": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
   "4272674": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "4587580": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "4874721": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "4874911": {
+   "ret": null,
+   "status": "OUT"
+  },
+  "5080152": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "5080153": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "5080179": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "5103599": {
+   "ret": null,
+   "status": "OUT"
+  },
+  "5149210": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "5161": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "5216882": {
+   "ret": null,
+   "status": "OUT"
+  },
+  "5216907": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "5275337": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "5560": {
    "ret": null,
    "status": "INJURY_RESERVE"
   }
