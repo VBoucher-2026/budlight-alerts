@@ -5,10 +5,10 @@
   "\ud83c\udfe5 Kirill Marchenko is IR-eligible: move ",
   "\u2705 Connor Hellebuyck is active again: mov"
  ],
- "last_daily": "2026-11-11",
+ "last_daily": "2026-11-12",
  "last_goalie": "2026-11-11",
  "last_weekly": "2026-11-09",
- "news_last": "2026-11-12T02:01:33.291136-05:00",
+ "news_last": "2026-11-12T13:44:30.494950-05:00",
  "news_seen": [
   "3852-Head coach Paul Maurice said Friday that Marchand (leg) is e",
   "3654006-Lyon (upper body) was spotted practicing at Tuesday's option",
@@ -90,7 +90,9 @@
   "3114775-8",
   "5831-7",
   "2555315-7",
-  "5216918-6"
+  "5216918-6",
+  "4697392-7",
+  "4588175-7"
  ],
  "stash_alerted": [],
  "stash_sunday": "2026-11-08",
@@ -162,10 +164,6 @@
   "5080179": {
    "ret": null,
    "status": "INJURY_RESERVE"
-  },
-  "5103599": {
-   "ret": null,
-   "status": "OUT"
   },
   "5149210": {
    "ret": null,
