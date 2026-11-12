@@ -6,9 +6,9 @@
   "\u2705 Connor Hellebuyck is active again: mov"
  ],
  "last_daily": "2026-11-12",
- "last_goalie": "2026-11-11",
+ "last_goalie": "2026-11-12",
  "last_weekly": "2026-11-09",
- "news_last": "2026-11-12T13:44:30.494950-05:00",
+ "news_last": "2026-11-12T18:59:50.025600-05:00",
  "news_seen": [
   "3852-Head coach Paul Maurice said Friday that Marchand (leg) is e",
   "3654006-Lyon (upper body) was spotted practicing at Tuesday's option",
@@ -113,10 +113,6 @@
    "ret": null,
    "status": "OUT"
   },
-  "3114743": {
-   "ret": null,
-   "status": "INJURY_RESERVE"
-  },
   "3114777": {
    "ret": null,
    "status": "INJURY_RESERVE"
@@ -146,10 +142,6 @@
    "status": "INJURY_RESERVE"
   },
   "4272674": {
-   "ret": null,
-   "status": "INJURY_RESERVE"
-  },
-  "4587580": {
    "ret": null,
    "status": "INJURY_RESERVE"
   },
