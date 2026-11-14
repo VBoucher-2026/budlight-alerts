@@ -9,7 +9,7 @@
  "last_daily": "2026-11-14",
  "last_goalie": "2026-11-14",
  "last_weekly": "2026-11-09",
- "news_last": "2026-11-14T11:53:46.128563-05:00",
+ "news_last": "2026-11-14T16:13:20.086151-05:00",
  "news_seen": [
   "3852-Head coach Paul Maurice said Friday that Marchand (leg) is e",
   "3654006-Lyon (upper body) was spotted practicing at Tuesday's option",
@@ -128,10 +128,6 @@
    "ret": null,
    "status": "INJURY_RESERVE"
   },
-  "3899946": {
-   "ret": null,
-   "status": "INJURY_RESERVE"
-  },
   "4233668": {
    "ret": null,
    "status": "INJURY_RESERVE"
@@ -182,7 +178,7 @@
   "3041997": "ACTIVE",
   "3042020": "ACTIVE",
   "3042088": "ACTIVE",
-  "3114770": "DAY_TO_DAY",
+  "3114770": "OUT",
   "3115032": "ACTIVE",
   "3120307": "ACTIVE",
   "3654006": "ACTIVE",
@@ -197,6 +193,7 @@
   "4024950": "ACTIVE",
   "4233875": "ACTIVE",
   "4233889": "ACTIVE",
+  "4268767": "ACTIVE",
   "4352732": "ACTIVE",
   "4378656": "ACTIVE",
   "4565231": "ACTIVE",
