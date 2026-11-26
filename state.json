@@ -6,10 +6,10 @@
   "\u2705 Connor Hellebuyck is active again: mov",
   "\ud83c\udfe5 Nick Schmaltz is IR-eligible: move him"
  ],
- "last_daily": "2026-11-25",
+ "last_daily": "2026-11-26",
  "last_goalie": "2026-11-24",
  "last_weekly": "2026-11-23",
- "news_last": "2026-11-26T03:04:15.588907-05:00",
+ "news_last": "2026-11-26T15:01:58.501195-05:00",
  "news_seen": [
   "3852-Head coach Paul Maurice said Friday that Marchand (leg) is e",
   "3654006-Lyon (upper body) was spotted practicing at Tuesday's option",
@@ -112,7 +112,11 @@
   "4874748-7",
   "4233643-6",
   "4697389-7",
-  "5646-7"
+  "5646-7",
+  "5103645-6",
+  "5080173-7",
+  "5149231-7",
+  "4565244-7"
  ],
  "stash_alerted": [],
  "stash_sunday": "2026-11-15",
@@ -160,10 +164,6 @@
   "5080153": {
    "ret": null,
    "status": "INJURY_RESERVE"
-  },
-  "5157": {
-   "ret": null,
-   "status": "OUT"
   },
   "5161": {
    "ret": null,
