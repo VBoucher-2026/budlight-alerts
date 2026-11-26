@@ -9,7 +9,7 @@
  "last_daily": "2026-11-25",
  "last_goalie": "2026-11-24",
  "last_weekly": "2026-11-23",
- "news_last": "2026-11-25T15:24:31.780934-05:00",
+ "news_last": "2026-11-25T22:25:21.641264-05:00",
  "news_seen": [
   "3852-Head coach Paul Maurice said Friday that Marchand (leg) is e",
   "3654006-Lyon (upper body) was spotted practicing at Tuesday's option",
@@ -67,7 +67,8 @@
   "1794762948042-Jack Quinn",
   "1795112634416-Zack Bolduc",
   "1795550243857-Sam Rinzel",
-  "1795637296803-Gavin McKenna"
+  "1795637296803-Gavin McKenna",
+  "1795662400846-Kiefer Sherwood"
  ],
  "seen_roles": [
   "4874730-6",
@@ -159,6 +160,10 @@
   "5080153": {
    "ret": null,
    "status": "INJURY_RESERVE"
+  },
+  "5157": {
+   "ret": null,
+   "status": "OUT"
   },
   "5161": {
    "ret": null,
