@@ -4,12 +4,13 @@
   "\ud83c\udfe5 Jason Robertson is IR-eligible: move h",
   "\ud83c\udfe5 Kirill Marchenko is IR-eligible: move ",
   "\u2705 Connor Hellebuyck is active again: mov",
-  "\ud83c\udfe5 Nick Schmaltz is IR-eligible: move him"
+  "\ud83c\udfe5 Nick Schmaltz is IR-eligible: move him",
+  "\u2705 Kirill Marchenko is active again: move"
  ],
- "last_daily": "2026-11-26",
+ "last_daily": "2026-11-27",
  "last_goalie": "2026-11-24",
  "last_weekly": "2026-11-23",
- "news_last": "2026-11-27T03:12:44.010779-05:00",
+ "news_last": "2026-11-27T14:50:28.812323-05:00",
  "news_seen": [
   "3852-Head coach Paul Maurice said Friday that Marchand (leg) is e",
   "3654006-Lyon (upper body) was spotted practicing at Tuesday's option",
@@ -117,7 +118,8 @@
   "5103645-6",
   "5080173-7",
   "5149231-7",
-  "4565244-7"
+  "4565244-7",
+  "4997137-6"
  ],
  "stash_alerted": [],
  "stash_sunday": "2026-11-15",
@@ -146,11 +148,19 @@
    "ret": null,
    "status": "INJURY_RESERVE"
   },
+  "3735": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
   "4233668": {
    "ret": null,
    "status": "INJURY_RESERVE"
   },
   "4272674": {
+   "ret": null,
+   "status": "INJURY_RESERVE"
+  },
+  "4391255": {
    "ret": null,
    "status": "INJURY_RESERVE"
   },
@@ -181,6 +191,10 @@
   "5275337": {
    "ret": null,
    "status": "INJURY_RESERVE"
+  },
+  "5509": {
+   "ret": null,
+   "status": "OUT"
   }
  },
  "statuses": {
@@ -216,7 +230,7 @@
   "4587588": "ACTIVE",
   "4587815": "ACTIVE",
   "4587994": "ACTIVE",
-  "4587996": "INJURY_RESERVE",
+  "4587996": "ACTIVE",
   "4697392": "ACTIVE",
   "4697725": "ACTIVE",
   "4874740": "ACTIVE",
